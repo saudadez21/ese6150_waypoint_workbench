@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Waypoint Workbench</title>
+    <link rel="icon" type="image/png" href="/web/assets/favicon.png" />
+    <link rel="stylesheet" href="/web/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img
+          class="brand-mark"
+          src="/web/assets/logo.png"
+          alt="Waypoint Workbench logo"
+        />
+        <div>
+          <strong>Waypoint <span>Workbench</span></strong>
+          <small>F1TENTH · LOCAL EDITOR</small>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span class="pill"><span class="green-dot"></span>LOCAL SESSION</span>
+        <button id="undo" class="button ghost" title="Ctrl+Z">↶ Undo</button>
+        <button id="redo" class="button ghost" title="Ctrl+Y">↷ Redo</button>
+        <button id="reset" class="button ghost" title="Restore loaded state">
+          ↺ Reset
+        </button>
+        <div class="separator"></div>
+        <button id="save" class="button primary">↧ Save As</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar sidebar-left">
+        <section>
+          <div class="section-head">
+            <h2>MAP</h2>
+            <span class="light-tag">ROS occupancy</span>
+          </div>
+          <div class="field">
+            <label for="maps">Active map</label>
+            <select id="maps"></select>
+          </div>
+          <button id="mapUpload" class="button wide outline">
+            ＋ Import YAML + Image
+          </button>
+          <input
+            id="mapInput"
+            type="file"
+            accept=".yaml,.yml,.png,.pgm,.jpg,.jpeg"
+            multiple
+            hidden
+          />
+          <div class="map-info" id="mapInfo">Choose a map</div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <h2>WAYPOINTS</h2>
+            <span id="trackCap" class="light-tag">0 / 5</span>
+          </div>
+          <div class="field">
+            <label for="files">Load from repository</label>
+            <div class="horizontal">
+              <select id="files"></select>
+              <button class="button icon-button" id="load" title="Load waypoint CSV">
+                ＋
+              </button>
+            </div>
+          </div>
+          <button id="csvUpload" class="button wide outline">
+            ⇧ Import CSV from computer
+          </button>
+          <button
+            id="refreshFiles"
+            class="button wide ghost"
+            title="Rescan maps/ and waypoints/"
+          >
+            ↻ Refresh Files
+          </button>
+          <input id="csvInput" type="file" accept=".csv,.txt" multiple hidden />
+          <div class="mini-note">Drop CSV into waypoints/ · maximum 5 tracks</div>
+          <div id="tracks" class="tracks">
+            <div class="empty-text">No tracks loaded yet. Import a CSV to begin.</div>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head"><h2>VISUALIZATION</h2></div>
+          <div class="radio-line">
+            <label
+              ><input type="radio" name="display" value="normal" checked />
+              Normal</label
+            >
+            <label
+              ><input type="radio" name="display" value="clearance" /> Clearance</label
+            >
+            <label
+              ><input type="radio" name="display" value="speed" disabled /> Speed</label
+            >
+          </div>
+          <div id="colorLegend" class="legend hidden">
+            <div class="gradient"></div>
+            <div class="legend-ends">
+              <span id="legendMin">Slow</span><span id="legendMax">Fast</span>
+            </div>
+          </div>
+          <div class="mini-note" id="clearanceInfo">
+            Clearance is informational and never blocks saving.
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <h2>SELECTED POINT</h2>
+            <span id="selectedIndex" class="light-tag">—</span>
+          </div>
+          <div class="horizontal">
+            <div class="field grow">
+              <label for="pointX">X · m</label
+              ><input id="pointX" type="number" step="0.01" disabled />
+            </div>
+            <div class="field grow">
+              <label for="pointY">Y · m</label
+              ><input id="pointY" type="number" step="0.01" disabled />
+            </div>
+          </div>
+          <div class="horizontal">
+            <button class="button outline grow" id="setStart">Set as Start</button>
+            <button class="button outline danger grow" id="delete">Delete Point</button>
+          </div>
+          <button id="reverse" class="button wide outline">⇄ Reverse Path</button>
+        </section>
+
+        <div class="left-bottom">
+          <span>WORKING COPY · NON-DESTRUCTIVE</span>
+          <p>
+            Save As creates a new file. Smooth, resample, speed and export experiments
+            live in scripts/.
+          </p>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <div class="canvas-toolbar">
+          <div class="mode-tabs">
+            <button class="mode active" data-mode="select">↖ Select / Move</button>
+            <button class="mode" data-mode="add">＋ Add Point</button>
+            <button class="mode" data-mode="pan">✥ Pan</button>
+          </div>
+          <div class="horizontal">
+            <span id="zoomText" class="zoom-text">100%</span>
+            <button id="zoomOut" class="button tiny" title="Zoom out">−</button>
+            <button id="zoomIn" class="button tiny" title="Zoom in">＋</button>
+            <button id="fit" class="button tiny" title="Fit map">Fit</button>
+          </div>
+        </div>
+        <div id="canvasBox" class="canvas-box">
+          <canvas id="mapCanvas"></canvas>
+          <div class="canvas-top">
+            <span id="mapChip">NO MAP</span><span id="loopChip">NO TRACK</span>
+          </div>
+          <div class="axis-label">MAP FRAME · METERS</div>
+          <div class="canvas-hint">
+            Scroll: zoom · Drag empty canvas: pan · Delete: remove point
+          </div>
+          <div id="dropZone" class="drop-zone hidden">
+            Drop CSV → waypoints/ · YAML + image → maps/
+          </div>
+        </div>
+        <div class="workspace-footer">
+          <div class="footer-metrics">
+            <span id="metricPoints"><b>—</b> points</span>
+            <span id="metricLength"><b>—</b> path length</span>
+            <span id="metricGap"><b>—</b> closure gap</span>
+          </div>
+          <span id="cursor">X — · Y —</span>
+        </div>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" aria-live="polite"></div>
+    <div class="modal-backdrop hidden" id="importModal">
+      <div class="preview-panel">
+        <h3>CSV layout</h3>
+        <p id="importDescription">Choose the columns for this headerless CSV.</p>
+        <div class="field">
+          <label for="importPreset">Column order</label>
+          <select id="importPreset">
+            <option value="auto">Auto detect</option>
+            <option value="xy">x,y</option>
+            <option value="xy_yaw_v">x,y,yaw,v</option>
+            <option value="s_x_y_psi_kappa_v_a">s,x,y,psi,kappa,v,a</option>
+          </select>
+        </div>
+        <div class="horizontal">
+          <button id="cancelImport" class="button outline grow">Cancel</button>
+          <button id="confirmImport" class="button primary grow">Import CSV</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/web/js/app.js"></script>
+  </body>
+</html>

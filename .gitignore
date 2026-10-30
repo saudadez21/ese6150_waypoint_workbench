@@ -218,3 +218,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# local
+.venv/
+install/
+log/
+*.swp
+node_modules/
+
+.DS_Store
+
+# temporary ignore
+docs/scripts.md
+scripts/*.py
+tests/
