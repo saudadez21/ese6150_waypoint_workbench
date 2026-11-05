@@ -225,6 +225,7 @@ install/
 log/
 *.swp
 node_modules/
+patches/
 
 .DS_Store
 

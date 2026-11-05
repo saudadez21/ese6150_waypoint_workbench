@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Config · Waypoint Workbench</title>
+    <link rel="icon" href="./assets/favicon.png" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body class="config-body">
+    <header class="topbar">
+      <a class="brand" href="./index.html"
+        ><img src="./assets/logo.png" alt="" /><strong
+          >Waypoint <span>Workbench</span></strong
+        ></a
+      >
+      <nav class="page-nav" aria-label="Pages">
+        <a href="./index.html">Waypoints</a><a href="./map-editor.html">Map Editor</a
+        ><a href="./config.html" class="active" aria-current="page">Config</a>
+      </nav>
+      <div class="actions">
+        <button
+          class="button subtle help-button"
+          type="button"
+          data-help
+          aria-label="Keyboard shortcuts"
+          title="Keyboard shortcuts"
+        >
+          ?
+        </button>
+      </div>
+    </header>
+    <main class="settings">
+      <h1>Config</h1>
+      <form id="settings">
+        <div class="settings-grid">
+          <section class="settings-card">
+            <h2>CONNECTION</h2>
+            <label for="apiUrl">API URL</label
+            ><input id="apiUrl" placeholder="http://127.0.0.1:6150" />
+            <label for="token">API write token</label
+            ><input id="token" type="password" autocomplete="off" />
+            <div class="button-row">
+              <button class="button" id="testApi" type="button">Test Connection</button
+              ><span id="apiStatus" class="muted">Not tested</span>
+            </div>
+          </section>
+          <section class="settings-card">
+            <h2>EDITOR</h2>
+            <label for="closureGap">Closure gap (m)</label
+            ><input id="closureGap" type="number" min="0.001" max="50" step="any" />
+            <label for="undoLimit">Undo limit</label
+            ><input id="undoLimit" type="number" min="1" max="500" />
+          </section>
+          <section class="settings-card">
+            <div class="heading-row">
+              <h2>TRACK COLORS</h2>
+              <button type="button" class="button subtle small" id="resetColors">
+                Defaults
+              </button>
+            </div>
+            <div id="colors" class="colors"></div>
+            <button type="button" class="button wide" id="addColor">+ Add Track</button
+            ><small id="colorCount" class="muted"></small>
+          </section>
+          <section class="settings-card aliases-card">
+            <div class="heading-row">
+              <h2>CSV COLUMN MAPPING</h2>
+              <button type="button" class="button subtle small" id="resetAliases">
+                Defaults
+              </button>
+            </div>
+            <div class="csv-precision">
+              <label for="csvDecimalPlaces">Decimal places</label>
+              <input
+                id="csvDecimalPlaces"
+                type="number"
+                min="0"
+                max="12"
+                step="1"
+                required
+              />
+            </div>
+            <div class="mapping-head">
+              <span>CSV column</span><span></span><span>Field</span><span></span>
+            </div>
+            <div id="aliasRows"></div>
+            <button type="button" class="button wide" id="addAlias">
+              + Add Mapping
+            </button>
+          </section>
+        </div>
+        <div class="settings-footer">
+          <button class="button primary" type="submit">Save Config</button
+          ><button class="button" type="button" id="exportConfig">Export JSON</button
+          ><button class="button" type="button" id="importConfig">Import JSON</button
+          ><input type="file" id="configFile" accept=".json" hidden /><span
+            id="configMessage"
+            class="muted"
+          ></span>
+        </div>
+      </form>
+    </main>
+    <script type="module" src="./js/config_page.js"></script>
+  </body>
+</html>

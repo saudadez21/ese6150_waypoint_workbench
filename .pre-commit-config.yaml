@@ -11,7 +11,7 @@ repos:
     rev: v3.1.0
     hooks:
       - id: prettier
-        files: ^src/waypoint_workbench/web/.*\.(js|css|html)$
+        files: ^web/.*\.(js|css|html)$
         additional_dependencies: [prettier@3.1.0]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -19,11 +19,15 @@ repos:
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
+        entry: python -m pre_commit_hooks.end_of_file_fixer
+        exclude: '\.(pgm|png|jpe?g|zip)$'
       - id: mixed-line-ending
         args: [--fix=lf]
       - id: check-yaml
+        entry: python -m pre_commit_hooks.check_yaml
       - id: check-json
       - id: check-toml
       - id: check-merge-conflict
+        entry: python -m pre_commit_hooks.check_merge_conflict
       - id: check-added-large-files
         args: [--maxkb=4096]

@@ -1,61 +1,32 @@
-"""TOML configuration and repository-relative path resolution."""
+"""Server configuration and repository paths."""
 
 from __future__ import annotations
 
-import os
-import re
+import sys
 from pathlib import Path
-from typing import Any
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:
+else:
     import tomli as tomllib
 
-# Editable source is <repo>/src/waypoint_workbench/
-# For regular installed packages, also try the current working directory
-ROOT = Path(__file__).resolve().parents[2]
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
 
 
-def default_config_path() -> Path:
-    """Find the default TOML configuration in the checkout or working directory."""
-    for root in (ROOT, Path.cwd()):
-        path = root / "config" / "default.toml"
-        if path.is_file():
-            return path
-
-    raise FileNotFoundError(
-        "Cannot find config/default.toml; run from the repository root or use --config"
-    )
-
-
-def load_config(path: str | Path | None = None) -> tuple[dict[str, Any], Path]:
-    """Load paths and validate editor track colors before starting the server."""
-    given = path or os.environ.get("WAYPOINT_WORKBENCH_CONFIG")
-    file = Path(given).expanduser().resolve() if given else default_config_path()
-
-    with file.open("rb") as handle:
-        config = tomllib.load(handle)
-
-    editor = config["editor"]
-    limit = editor["max_tracks"]
-    colors = editor["track_colors"]
-
-    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
-        raise ValueError("editor.max_tracks must be a positive integer")
-    if not isinstance(colors, list) or len(colors) < limit:
-        raise ValueError("editor.track_colors needs at least max_tracks colors")
-    if any(
-        not isinstance(color, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", color)
-        for color in colors
-    ):
-        raise ValueError("editor.track_colors must contain #RRGGBB hex colors")
-    if len({color.lower() for color in colors}) != len(colors):
-        raise ValueError("editor.track_colors must contain distinct colors")
-
-    root = file.parent.parent
-    for key in ("maps", "waypoints"):
-        location = Path(config["paths"][key]).expanduser()
-        config["paths"][key] = str((root / location).resolve())
-
-    return config, root
+def load_config(path: str | Path | None = None) -> dict:
+    root = project_root()
+    config_path = Path(path).resolve() if path else root / "config/server.toml"
+    with config_path.open("rb") as stream:
+        data = tomllib.load(stream)
+    for kind in ("maps", "waypoints"):
+        directory = Path(data["paths"][kind]).expanduser()
+        data["paths"][kind] = (
+            directory if directory.is_absolute() else root / directory
+        ).resolve()
+    data["web_dir"] = root / "web"
+    port = data["server"]["port"]
+    if not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ValueError("Invalid port")
+    return data

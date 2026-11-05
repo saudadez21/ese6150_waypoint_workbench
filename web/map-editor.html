@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Map Editor · Waypoint Workbench</title>
+    <link rel="icon" href="./assets/favicon.png" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./index.html"
+        ><img src="./assets/logo.png" alt="" /><strong
+          >Waypoint <span>Workbench</span></strong
+        ></a
+      >
+      <nav class="page-nav" aria-label="Pages">
+        <a href="./index.html">Waypoints</a>
+        <a href="./map-editor.html" class="active" aria-current="page">Map Editor</a>
+        <a href="./config.html">Config</a>
+      </nav>
+      <div class="actions">
+        <button
+          class="button subtle help-button"
+          type="button"
+          data-help
+          aria-label="Keyboard shortcuts"
+          title="Keyboard shortcuts"
+        >
+          ?</button
+        ><button class="button subtle" id="undo" disabled>Undo</button
+        ><button class="button subtle" id="redo" disabled>Redo</button
+        ><button class="button subtle" id="reset" disabled>Reset</button
+        ><button class="button primary" id="downloadMap" disabled>Download ZIP</button>
+      </div>
+    </header>
+    <div class="layout">
+      <aside class="sidebar" id="editorSidebar">
+        <div class="sidebar-head">
+          <button
+            class="sidebar-toggle"
+            id="toggleSidebar"
+            type="button"
+            aria-expanded="true"
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+          >
+            ‹
+          </button>
+        </div>
+        <div class="sidebar-content">
+          <section>
+            <h2>MAP</h2>
+            <label for="mapFiles">API maps</label>
+            <select id="mapFiles" disabled>
+              <option value="">No API connection</option>
+            </select>
+            <div class="button-row">
+              <button class="button" id="loadApiMap" disabled>Load</button
+              ><button class="button subtle" id="refreshMaps" disabled>Refresh</button>
+            </div>
+            <div class="button-row">
+              <button class="button" id="newMap">New</button
+              ><button class="button" id="importMap">Import Map</button>
+            </div>
+            <input
+              id="mapInput"
+              type="file"
+              accept=".yaml,.pgm,.png,.zip"
+              multiple
+              hidden
+            />
+            <p class="file-info" id="mapInfo">No map loaded</p>
+            <button class="button small subtle hidden" id="clearPendingMap">
+              Clear pending import
+            </button>
+          </section>
+          <section>
+            <h2>PAINT</h2>
+            <label for="paintValue">Value</label>
+            <select id="paintValue">
+              <option value="wall">Wall</option>
+              <option value="free">Free</option>
+              <option value="unknown">Unknown</option>
+            </select>
+            <label for="paintShape">Tool</label>
+            <select
+              id="paintShape"
+              title="Right-drag or Space + drag to pan; Shift + Ellipse for a circle"
+            >
+              <option value="brush">Brush</option>
+              <option value="line">Line</option>
+              <option value="rectangle">Rectangle</option>
+              <option value="ellipse">Ellipse</option>
+              <option value="fill">Fill</option>
+              <option value="eyedropper">Eyedropper</option>
+              <option value="pan">Pan</option>
+            </select>
+            <label for="brushSize">Size: <span id="brushLabel">7</span> px</label>
+            <input id="brushSize" type="range" min="1" max="50" value="7" />
+            <label class="checkbox"
+              ><input id="fillShape" type="checkbox" /> Filled shape</label
+            >
+          </section>
+          <section>
+            <h2>EXPORT</h2>
+            <label for="mapName">Map name</label>
+            <input
+              id="mapName"
+              type="text"
+              placeholder="levine_2nd"
+              maxlength="80"
+              spellcheck="false"
+            />
+            <button class="button primary wide" id="downloadAside" disabled>
+              Download ZIP
+            </button>
+          </section>
+        </div>
+      </aside>
+      <div
+        class="sidebar-divider"
+        id="sidebarDivider"
+        role="separator"
+        aria-label="Resize sidebar"
+        aria-orientation="vertical"
+        tabindex="0"
+      ></div>
+      <main class="workspace">
+        <div class="canvas-toolbar">
+          <span class="muted" id="mapTitle">Map Editor</span>
+          <div class="actions">
+            <span id="zoomValue" class="muted">100%</span
+            ><button class="button compact" id="zoomOut">−</button
+            ><button class="button compact" id="zoomIn">+</button
+            ><button class="button compact" id="fit">Fit</button>
+          </div>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="canvas" tabindex="0" aria-label="Map canvas"></canvas>
+          <div id="dropZone" class="drop-zone hidden">Drop YAML + image or ZIP</div>
+        </div>
+        <footer class="canvas-footer">
+          <span id="status">No map loaded</span><span id="cursor">Pixel X — · Y —</span>
+        </footer>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <dialog class="creation-dialog" id="newMapDialog" aria-labelledby="newMapTitle">
+      <form id="newMapForm">
+        <h3 id="newMapTitle">New Map</h3>
+        <label for="newMapName">Map name</label>
+        <input
+          id="newMapName"
+          type="text"
+          maxlength="80"
+          value="new_map"
+          pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*"
+          required
+          spellcheck="false"
+        />
+        <div class="creation-grid">
+          <label for="newMapWidth"
+            >Width (px)<input
+              id="newMapWidth"
+              type="number"
+              min="1"
+              max="5000"
+              step="1"
+              value="400"
+              required
+          /></label>
+          <label for="newMapHeight"
+            >Height (px)<input
+              id="newMapHeight"
+              type="number"
+              min="1"
+              max="5000"
+              step="1"
+              value="400"
+              required
+          /></label>
+        </div>
+        <label for="newMapResolution">Resolution (m/px)</label>
+        <input
+          id="newMapResolution"
+          type="number"
+          min="0.000001"
+          max="10"
+          step="any"
+          value="0.05"
+          required
+        />
+        <div class="creation-grid">
+          <label for="newMapOriginX"
+            >Origin X (m)<input
+              id="newMapOriginX"
+              type="number"
+              step="any"
+              value="-10"
+              required
+          /></label>
+          <label for="newMapOriginY"
+            >Origin Y (m)<input
+              id="newMapOriginY"
+              type="number"
+              step="any"
+              value="-10"
+              required
+          /></label>
+        </div>
+        <p class="file-info">Initial occupancy: Free · Image format: PGM</p>
+        <div class="button-row right">
+          <button class="button subtle" type="button" id="cancelNewMap">Cancel</button>
+          <button class="button primary" type="submit">Create</button>
+        </div>
+      </form>
+    </dialog>
+    <script type="module" src="./js/maps_page.js"></script>
+  </body>
+</html>

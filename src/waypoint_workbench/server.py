@@ -1,174 +1,184 @@
-"""Local Flask backend for file I/O, maps, and clearance visualization."""
+"""Static frontend and optional local file API."""
 
 from __future__ import annotations
 
-import io
+import base64
+import os
 from pathlib import Path
 
-import numpy as np
-from flask import Flask, jsonify, request, send_file, send_from_directory
+from flask import Flask, Response, jsonify, request
 
 from .config import load_config
-from .core.csv_io import PRESETS, parse_csv
-from .core.file_store import available_csvs, basic_csv, source_path, write_unique
-from .core.geometry import as_points
-from .core.map_io import MapRepository
+from .storage import (
+    AlreadyExists,
+    VersionConflict,
+    etag_for,
+    list_maps,
+    list_waypoints,
+    read_map,
+    read_waypoint,
+    save_map,
+    save_waypoint,
+)
 
-WEB = Path(__file__).resolve().parent / "web"
 
+def create_app(settings: dict | None = None) -> Flask:
+    settings = settings or load_config()
+    web = Path(settings["web_dir"])
+    maps = Path(settings["paths"]["maps"])
+    waypoints = Path(settings["paths"]["waypoints"])
+    maps.mkdir(parents=True, exist_ok=True)
+    waypoints.mkdir(parents=True, exist_ok=True)
+    permissions = settings["permissions"]
+    allowed = set(settings["security"].get("allowed_origins", []))
+    token = os.environ.get(
+        settings["security"].get("token_env", "WAYPOINT_WORKBENCH_TOKEN"), ""
+    )
 
-def create_app(config=None):
-    if config is None:
-        config, _ = load_config()
-
-    app = Flask(__name__)
-    app.config["MAX_CONTENT_LENGTH"] = 27 * 1024 * 1024
-
-    max_points = int(config["editor"]["max_points"])
-    waypoint_dir = Path(config["paths"]["waypoints"])
-    waypoint_dir.mkdir(parents=True, exist_ok=True)
-    maps = MapRepository(config["paths"]["maps"])
-    closure_limit = float(config["editor"]["closure_max_gap_m"])
-
-    def payload():
-        obj = request.get_json(silent=True)
-        if not isinstance(obj, dict):
-            raise ValueError("Expected a JSON object")
-        return obj
-
-    def points_of(obj):
-        return as_points(obj.get("points"), max_points=max_points)
-
-    def optional_data(obj, points):
-        speed = obj.get("speed")
-
-        if speed is not None:
-            speed = np.asarray(speed, dtype=float)
-            if (
-                speed.shape != (len(points),)
-                or not np.isfinite(speed).all()
-                or np.any(speed < 0)
-            ):
-                raise ValueError("Invalid speed array")
-
-        return speed
-
-    @app.errorhandler(ValueError)
-    def invalid(exc):
-        return jsonify(error=str(exc)), 400
-
-    @app.errorhandler(413)
-    def too_large(_exc):
-        return jsonify(error="Upload too large"), 413
+    # Flask serves every web asset, including /map-editor.html and /config.html.
+    app = Flask(__name__, static_folder=str(web), static_url_path="")
+    app.config["MAX_CONTENT_LENGTH"] = settings["limits"]["max_upload_mb"] * 1024**2
 
     @app.get("/")
     def home():
-        response = send_from_directory(WEB, "index.html")
-        response.headers["Cache-Control"] = "no-store"
+        return app.send_static_file("index.html")
+
+    @app.errorhandler(ValueError)
+    def bad_request(error):
+        return jsonify(error=str(error)), 400
+
+    @app.errorhandler(AlreadyExists)
+    def already_exists(error):
+        return jsonify(error=str(error)), 409
+
+    @app.errorhandler(VersionConflict)
+    def stale(error):
+        return jsonify(error=str(error)), 412
+
+    @app.errorhandler(FileNotFoundError)
+    def not_found(_error):
+        return jsonify(error="File not found"), 404
+
+    @app.errorhandler(413)
+    def too_large(_error):
+        return jsonify(error="File too large"), 413
+
+    @app.after_request
+    def headers(response):
+        origin = request.headers.get("Origin")
+        if origin in allowed:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Authorization, Content-Type, If-Match"
+            )
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, OPTIONS"
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
+            response.headers["Vary"] = "Origin"
+        if request.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
         return response
 
-    @app.get("/web/<path:name>")
-    def static_web(name):
-        response = send_from_directory(WEB, name)
-        response.headers["Cache-Control"] = "no-store"
-        return response
+    @app.before_request
+    def guard():
+        if not request.path.startswith("/api/"):
+            return None
+        origin = request.headers.get("Origin")
+        own_origin = f"{request.scheme}://{request.host}"
+        if origin and origin != own_origin and origin not in allowed:
+            return jsonify(error="Origin not allowed"), 403
+        if request.method == "OPTIONS":
+            return Response(status=204)
+        if request.method in ("POST", "PUT"):
+            if not request.is_json and request.mimetype != "multipart/form-data":
+                return jsonify(error="Unsupported content type"), 415
+            remote = request.remote_addr not in ("127.0.0.1", "::1")
+            cross_origin = bool(origin and origin != own_origin)
+            if (remote or cross_origin) and (
+                not token or request.headers.get("Authorization") != f"Bearer {token}"
+            ):
+                return jsonify(error="API write token required"), 403
+        return None
 
-    @app.get("/api/bootstrap")
-    def bootstrap():
+    @app.get("/api/health")
+    def health():
         return jsonify(
-            config={key: value for key, value in config.items() if key != "paths"},
-            default_map=config["paths"]["default_map"],
-            default_waypoint=config["paths"]["default_waypoint"],
-            maps=maps.list_maps(),
-            waypoints=available_csvs(waypoint_dir),
-            presets=PRESETS,
+            status="ok", service="waypoint_workbench", capabilities=permissions
         )
-
-    @app.get("/api/maps")
-    def map_list():
-        return jsonify(maps=maps.list_maps())
 
     @app.get("/api/waypoints")
     def waypoint_list():
-        return jsonify(files=available_csvs(waypoint_dir))
+        return jsonify(files=list_waypoints(waypoints))
 
-    @app.post("/api/waypoints/load")
-    def waypoint_load():
-        obj = payload()
-        file = source_path(waypoint_dir, str(obj["filename"]))
-        parsed = parse_csv(
-            file.read_text(encoding="utf-8-sig"),
-            preset=obj.get("preset", "auto"),
-            max_points=max_points,
+    @app.get("/api/waypoints/<name>")
+    def waypoint_get(name):
+        blob, etag = read_waypoint(waypoints, name)
+        return Response(blob, mimetype="text/csv", headers={"ETag": etag})
+
+    def save_csv(name: str, expected: str | None):
+        permission = "waypoint_replace" if expected is not None else "waypoint_create"
+        if not permissions[permission]:
+            return jsonify(error="Operation disabled"), 403
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
+            raise ValueError("Expected JSON text field")
+        new_etag = save_waypoint(
+            waypoints, name, payload["text"].encode("utf-8"), expected
         )
-        return jsonify(**parsed, filename=str(file.relative_to(waypoint_dir)))
+        return jsonify(filename=name, etag=new_etag), 200 if expected else 201
 
-    @app.post("/api/waypoints/import")
-    def waypoint_import():
-        """Validate first, then persist browser-imported CSV in waypoints/."""
-        obj = payload()
-        name = obj.get("filename")
-        content = obj.get("text")
-        if not isinstance(name, str) or not name.lower().endswith((".csv", ".txt")):
-            raise ValueError("Please import a CSV or text waypoint file")
-        if not isinstance(content, str) or len(content.encode("utf-8")) > 5_000_000:
-            raise ValueError("CSV file is invalid or exceeds 5 MB")
+    @app.post("/api/waypoints/<name>")
+    def waypoint_post(name):
+        return save_csv(name, None)
 
-        parsed = parse_csv(
-            content,
-            preset=obj.get("preset", "auto"),
-            max_points=max_points,
-        )
-        stored = write_unique(waypoint_dir, name, content)
-        return jsonify(**parsed, filename=stored)
+    @app.put("/api/waypoints/<name>")
+    def waypoint_put(name):
+        expected = request.headers.get("If-Match")
+        if not expected:
+            return jsonify(error="If-Match required"), 428
+        return save_csv(name, expected)
 
-    @app.get("/api/maps/<path:id>")
-    def map_meta(id):
-        return jsonify(maps.meta(id))
+    @app.get("/api/maps")
+    def map_list():
+        return jsonify(files=list_maps(maps))
 
-    @app.get("/api/maps/image/<path:id>")
-    def map_image(id):
-        return send_file(io.BytesIO(maps.image_png(id)), mimetype="image/png")
-
-    @app.post("/api/maps/upload")
-    def map_upload():
-        yaml = request.files.get("yaml")
-        image = request.files.get("image")
-        if yaml is None or image is None:
-            raise ValueError("Provide YAML and image together")
-        map_id = maps.import_pair(
-            yaml.filename,
-            yaml.read(),
-            image.filename,
-            image.read(),
-        )
-        return jsonify(maps.meta(map_id))
-
-    @app.post("/api/validate")
-    def validate_route():
-        obj = payload()
-        points = points_of(obj)
-        threshold = float(config["vehicle"]["width_m"]) / 2 + float(
-            config["clearance"]["safety_margin_m"]
-        )
+    @app.get("/api/maps/<name>/bundle")
+    def map_get(name):
+        yaml_name, yaml_blob, image_name, image_blob = read_map(maps, name)
         return jsonify(
-            maps.validate(
-                obj["map_id"],
-                points,
-                threshold_m=threshold,
-                closure_limit_m=closure_limit,
-                unknown_is_obstacle=config["clearance"]["unknown_is_obstacle"],
-            )
+            yaml_name=yaml_name,
+            yaml_text=yaml_blob.decode("utf-8-sig"),
+            image_name=image_name,
+            image_base64=base64.b64encode(image_blob).decode("ascii"),
+            etag=etag_for(yaml_blob, image_blob),
         )
 
-    @app.post("/api/waypoints/save")
-    def waypoint_save():
-        """Save current working geometry/data to a NEW CSV; never overwrite."""
-        obj = payload()
-        points = points_of(obj)
-        speed = optional_data(obj, points)
-        text = basic_csv(points, speed)
-        filename = write_unique(waypoint_dir, obj.get("filename", "waypoints"), text)
-        return jsonify(filename=filename)
+    def save_pair(name: str, expected: str | None):
+        permission = "map_replace" if expected is not None else "map_create"
+        if not permissions[permission]:
+            return jsonify(error="Operation disabled"), 403
+        yaml_file = request.files.get("yaml")
+        image_file = request.files.get("image")
+        if not yaml_file or not image_file or yaml_file.filename != name:
+            raise ValueError("Provide matching YAML and image files")
+        new_etag = save_map(
+            maps,
+            name,
+            yaml_file.read(),
+            image_file.filename,
+            image_file.read(),
+            expected,
+        )
+        return jsonify(filename=name, etag=new_etag), 200 if expected else 201
+
+    @app.post("/api/maps/<name>")
+    def map_post(name):
+        return save_pair(name, None)
+
+    @app.put("/api/maps/<name>")
+    def map_put(name):
+        expected = request.headers.get("If-Match")
+        if not expected:
+            return jsonify(error="If-Match required"), 428
+        return save_pair(name, expected)
 
     return app

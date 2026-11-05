@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "waypoint-workbench"
-version = "0.2.0"
+version = "0.3.0"
 description = "Offline F1TENTH waypoint editing and ROS 2 recording"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ dependencies = [
     "Flask>=2.3,<4",
     "numpy>=1.24",
     "scipy>=1.10",
-    "Pillow>=9.0",
+        "Pillow>=9.0",
     "PyYAML>=6.0",
     "tomli>=2; python_version < '3.11'",
 ]
@@ -30,9 +30,6 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["waypoint_workbench*"]
-
-[tool.setuptools.package-data]
-waypoint_workbench = ["web/*.html", "web/*.css", "web/js/*.js", "web/assets/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

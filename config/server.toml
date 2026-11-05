@@ -1,0 +1,20 @@
+[server]
+host = "127.0.0.1"
+port = 6150
+
+[paths]
+maps = "maps"
+waypoints = "waypoints"
+
+[permissions]
+waypoint_create = true
+waypoint_replace = false
+map_create = true
+map_replace = false
+
+[security]
+allowed_origins = []
+token_env = "WAYPOINT_WORKBENCH_TOKEN"
+
+[limits]
+max_upload_mb = 32
