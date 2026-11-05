@@ -225,10 +225,10 @@ install/
 log/
 *.swp
 node_modules/
+patches/
 
 .DS_Store
 
 # temporary ignore
 docs/scripts.md
 scripts/*.py
-tests/

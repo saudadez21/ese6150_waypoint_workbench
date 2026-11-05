@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Waypoints · Waypoint Workbench</title>
+    <link rel="icon" href="./assets/favicon.png" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./index.html"
+        ><img src="./assets/logo.png" alt="" /><strong
+          >Waypoint <span>Workbench</span></strong
+        ></a
+      >
+      <nav class="page-nav" aria-label="Pages">
+        <a href="./index.html" class="active" aria-current="page">Waypoints</a>
+        <a href="./map-editor.html">Map Editor</a>
+        <a href="./config.html">Config</a>
+      </nav>
+      <div class="actions">
+        <button
+          class="button subtle help-button"
+          type="button"
+          data-help
+          aria-label="Keyboard shortcuts"
+          title="Keyboard shortcuts"
+        >
+          ?
+        </button>
+        <button class="button subtle" id="undo" disabled>Undo</button>
+        <button class="button subtle" id="redo" disabled>Redo</button>
+        <button class="button subtle" id="reset" disabled>Reset</button>
+        <button class="button primary" id="download" disabled>Download CSV</button>
+      </div>
+    </header>
+    <div class="layout">
+      <aside class="sidebar" id="editorSidebar">
+        <div class="sidebar-head">
+          <button
+            class="sidebar-toggle"
+            id="toggleSidebar"
+            type="button"
+            aria-expanded="true"
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+          >
+            ‹
+          </button>
+        </div>
+        <div class="sidebar-content">
+          <section>
+            <h2>MAP</h2>
+            <label for="mapFiles">API maps</label>
+            <select id="mapFiles" disabled>
+              <option value="">No API connection</option>
+            </select>
+            <div class="button-row">
+              <button class="button" id="loadApiMap" disabled>Load</button>
+              <button class="button subtle" id="refreshMaps" disabled>Refresh</button>
+            </div>
+            <button class="button wide" id="importMap">Import Map</button>
+            <button class="button wide secondary" id="uploadMap" disabled>
+              Upload
+            </button>
+            <input
+              id="mapInput"
+              type="file"
+              accept=".yaml,.pgm,.png,.zip"
+              multiple
+              hidden
+            />
+            <p class="file-info" id="mapInfo">No map loaded</p>
+            <button class="button small subtle hidden" id="clearPendingMap">
+              Clear pending import
+            </button>
+          </section>
+          <section>
+            <h2>WAYPOINTS</h2>
+            <label for="waypointFiles">API waypoints</label>
+            <select id="waypointFiles" disabled>
+              <option value="">No API connection</option>
+            </select>
+            <div class="button-row">
+              <button class="button" id="loadApiWaypoint" disabled>Load</button>
+              <button class="button subtle" id="refreshWaypoints" disabled>
+                Refresh
+              </button>
+            </div>
+            <div class="button-row">
+              <button class="button" id="newWaypoint">New</button
+              ><button class="button" id="importCsv">Import CSV</button>
+            </div>
+            <button class="button wide secondary" id="uploadWaypoint" disabled>
+              Upload
+            </button>
+            <input id="csvInput" type="file" accept=".csv" multiple hidden />
+            <div class="track-list" id="tracks">
+              <p class="empty">No tracks loaded</p>
+            </div>
+            <small id="trackCount">0 / 8 tracks</small>
+          </section>
+          <section>
+            <h2>DISPLAY</h2>
+            <div class="radio-row">
+              <label
+                ><input type="radio" name="display" value="normal" checked />
+                Normal</label
+              >
+              <label><input type="radio" name="display" value="speed" /> Speed</label>
+            </div>
+            <div id="legend" class="legend hidden">
+              <div class="gradient"></div>
+              <div class="legend-label">
+                <span id="lowSpeed"></span><span id="highSpeed"></span>
+              </div>
+            </div>
+          </section>
+          <section>
+            <h2>SELECTION</h2>
+            <p class="selection-info" id="selectionInfo">No selection</p>
+            <div class="coords">
+              <label for="deltaX"
+                >ΔX (m)<input id="deltaX" type="number" step="any" value="0" disabled
+              /></label>
+              <label for="deltaY"
+                >ΔY (m)<input id="deltaY" type="number" step="any" value="0" disabled
+              /></label>
+            </div>
+            <div class="button-row selection-actions">
+              <button class="button" id="moveSelection" disabled>Move</button>
+              <button class="button danger" id="deletePoint" disabled>Delete</button>
+              <button class="button subtle" id="clearSelection" disabled>Clear</button>
+            </div>
+            <button class="button wide subtle" id="setStart" disabled>Set Start</button>
+            <button class="button wide subtle" id="reverse" disabled>
+              Reverse Path
+            </button>
+          </section>
+        </div>
+      </aside>
+      <div
+        class="sidebar-divider"
+        id="sidebarDivider"
+        role="separator"
+        aria-label="Resize sidebar"
+        aria-orientation="vertical"
+        tabindex="0"
+      ></div>
+      <main class="workspace">
+        <div class="canvas-toolbar">
+          <div class="tool-group">
+            <div class="mode-tabs">
+              <button class="mode active" data-mode="select">Select</button
+              ><button class="mode" data-mode="add">Add Point</button
+              ><button class="mode" data-mode="pan">Pan</button>
+            </div>
+            <div
+              class="add-mode-tabs hidden"
+              id="addModeWrap"
+              aria-label="Add point mode"
+            >
+              <button class="mode" data-add-mode="append">Append</button>
+              <button class="mode active" data-add-mode="insert">Insert</button>
+            </div>
+          </div>
+          <div class="actions">
+            <span id="zoomValue" class="muted">100%</span
+            ><button class="button compact" id="zoomOut">−</button
+            ><button class="button compact" id="zoomIn">+</button
+            ><button class="button compact" id="fit">Fit</button>
+          </div>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="canvas" tabindex="0" aria-label="Waypoint canvas"></canvas>
+          <div id="pointTooltip" class="point-tooltip hidden" role="tooltip"></div>
+          <div id="dropZone" class="drop-zone hidden">Drop CSV or map files</div>
+        </div>
+        <footer class="canvas-footer">
+          <span id="status">No track loaded</span><span id="measurements"></span
+          ><span id="cursor">X — · Y —</span>
+        </footer>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div
+      class="modal hidden"
+      id="csvError"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="csvErrorTitle"
+    >
+      <div class="dialog">
+        <h3 id="csvErrorTitle">CSV import failed</h3>
+        <p id="csvErrorText"></p>
+        <div class="button-row right">
+          <button class="button" id="dismissCsvError">Close</button
+          ><a class="button secondary" href="./config.html">Open Config</a>
+        </div>
+      </div>
+    </div>
+    <dialog class="creation-dialog" id="newTrackDialog" aria-labelledby="newTrackTitle">
+      <form id="newTrackForm">
+        <h3 id="newTrackTitle">New Waypoint</h3>
+        <label for="newTrackName">Track name</label>
+        <input
+          id="newTrackName"
+          type="text"
+          value="new_track"
+          maxlength="80"
+          pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*"
+          required
+          spellcheck="false"
+        />
+        <div class="button-row right">
+          <button class="button subtle" type="button" id="cancelNewTrack">
+            Cancel
+          </button>
+          <button class="button primary" type="submit">Create</button>
+        </div>
+      </form>
+    </dialog>
+    <script type="module" src="./js/waypoints_page.js"></script>
+  </body>
+</html>

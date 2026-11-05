@@ -1,52 +1,54 @@
-# Waypoint Workbench | F1TENTH
+# Waypoint Workbench
 
-Small **offline waypoint editor** + **independent ROS 2 PF recorder** for UPenn ESE 6150 group labs and race.
+A browser-based toolkit for waypoint visualization, trajectory inspection, and ROS occupancy map editing, developed for F1TENTH (UPenn ESE6150).
 
-## Quick start: web editor
+## Features
 
-Python **3.10+**, NumPy, SciPy, Flask, Pillow, PyYAML. Run from the repository root:
+- **Waypoint Editor**: Import, visualize, compare, and manually adjust CSV trajectories. Supports multiple tracks, speed visualization, and CSV export.
+- **Map Editor**: Edit ROS occupancy maps using drawing tools and export YAML/image pairs as ZIP files.
+- **Python File API**: Optional local server for loading, uploading, and backing up maps and waypoints.
+- **ROS 2 Recorder**: Record waypoints from vehicle localization data.
 
-```bash
-# If you use uv (installs/syncs dependencies automatically)
-uv run python -m waypoint_workbench
+## Run
 
-# Or, for a regular Python environment
-python -m pip install -e .
-python -m waypoint_workbench
+The local server provides the frontend and File API at `http://127.0.0.1:6150`.
+
+### With uv
+
+```powershell
+uv run python -m waypoint_workbench --port 6150
 ```
 
-Open **http://127.0.0.1:5050**.
+### Without uv
 
-Default config: `config/default.toml`, default map: `Spielberg`, default waypoint: `Spielberg_centerline.csv` sample. Set `default_waypoint = ""` to start with no track. To use an alternate config:
+Requires Python and pip. Create a virtual environment and install the project:
 
-```bash
-python -m waypoint_workbench --config /path/to/your.toml
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m waypoint_workbench --port 6150
 ```
 
-For LAN access only when you intentionally want it, pass `--host 0.0.0.0`.
+### Frontend Only
 
-## ROS 2 recorder (vehicle / simulator)
+The frontend can also run without installing project dependencies. The File API is unavailable in this mode.
 
-Pure-Python `ament_python` package: `ros2/waypoint_recorder`.
-
-Place this repo in the ROS workspace's `src/`, build and source your normal setup script:
-
-```bash
-cd ~/f1tenth_ws
-colcon build --packages-select waypoint_recorder
-source install/setup.bash
-cd ~/f1tenth_ws/src/waypoint_workbench
-ros2 run waypoint_recorder waypoint_logger
+```powershell
+python -m http.server 8000 -d web
 ```
 
-The **default output directory is `./waypoints/` relative to your current working directory**.
+Open [`http://127.0.0.1:8000`](http://127.0.0.1:8000) in a browser.
 
-Output is a newly created `recorded_YYYYMMDD_HHMMSS.csv` with `x,y` header, no repeated closure point.
+## Development
 
-Default inputs are **`/pf/pose/odom`** (`nav_msgs/msg/Odometry`, true-car PF map pose). Simulation option:
-
-```bash
-ros2 run waypoint_recorder waypoint_logger --ros-args -p pose_topic:=/ego_racecar/odom -p expected_frame:=map
+```powershell
+uv sync --extra dev
+uv run --extra dev python -m pre_commit install
+uv run --extra dev python -m pre_commit run --all-files
+uv run --extra dev pytest -q
+node --test tests/*.mjs
 ```
 
-ROS parameters: `pose_topic` (default `/pf/pose/odom`), `minimum_distance` (0.15 m), `max_jump_m` (2.0 m, jumps are skipped and logged), `expected_frame` (`map`, accepts `/map`), `output_dir` (default `./waypoints/`).
+## Documentation
+
+API endpoints, file operations, and server permissions are documented in [docs/api.md](docs/api.md).
