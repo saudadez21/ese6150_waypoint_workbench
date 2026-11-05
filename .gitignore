@@ -232,4 +232,3 @@ patches/
 # temporary ignore
 docs/scripts.md
 scripts/*.py
-tests/
