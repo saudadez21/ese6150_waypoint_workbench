@@ -1,4 +1,5 @@
-import { MapPaint } from "./map_paint.js";
+import { visualGray, renderOccupancy } from "./map_codec.js";
+import { MapPaint, snapLine45, threePointFrame } from "./map_paint.js";
 
 /** Pixel-space ROS occupancy map painter, separate from waypoint interactions. */
 export class MapEditCanvas {
@@ -7,19 +8,21 @@ export class MapEditCanvas {
     this.ctx = canvas.getContext("2d");
     this.callbacks = callbacks;
     this.map = null;
-    this.image = null;
     this.paint = null;
-    this.imageData = null;
     this.buffer = null;
     this.mode = "brush";
     this.value = "wall";
-    this.brushSize = 7;
+    this.brushSize = 3;
     this.filled = false;
+    this.construction = "drag";
     this.zoom = 1;
     this.panX = 0;
     this.panY = 0;
     this.drag = null;
     this.preview = null;
+    this.lineAnchor = null;
+    this.shapePoints = [];
+    this.shiftHeld = false;
     this.spaceHeld = false;
 
     window.addEventListener("keydown", (event) => {
@@ -37,6 +40,24 @@ export class MapEditCanvas {
       this.spaceHeld = true;
       this.updateCursor();
     });
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Shift") {
+        this.shiftHeld = true;
+        if (this.preview) {
+          this.preview.shift = true;
+          this.draw();
+        }
+      }
+    });
+    window.addEventListener("keyup", (event) => {
+      if (event.key === "Shift") {
+        this.shiftHeld = false;
+        if (this.preview) {
+          this.preview.shift = false;
+          this.draw();
+        }
+      }
+    });
     window.addEventListener("keyup", (event) => {
       if (event.code !== "Space") return;
       this.spaceHeld = false;
@@ -44,6 +65,7 @@ export class MapEditCanvas {
     });
     window.addEventListener("blur", () => {
       this.spaceHeld = false;
+      this.shiftHeld = false;
       this.updateCursor();
     });
     canvas.addEventListener("contextmenu", (event) => event.preventDefault());
@@ -52,6 +74,11 @@ export class MapEditCanvas {
     canvas.addEventListener("pointerdown", (event) => this.pointerDown(event));
     canvas.addEventListener("pointermove", (event) => this.pointerMove(event));
     canvas.addEventListener("pointerup", (event) => this.pointerUp(event));
+    canvas.addEventListener("dblclick", (event) => {
+      if (event.button !== 0 || this.mode !== "line" || this.spaceHeld) return;
+      event.preventDefault();
+      this.finishLineChain();
+    });
     canvas.addEventListener("pointercancel", (event) => {
       if (this.drag?.pointerId === event.pointerId) this.cancelStroke();
     });
@@ -65,20 +92,20 @@ export class MapEditCanvas {
     );
   }
 
-  async setMap(map, image) {
+  async setMap(map) {
     this.map = map;
-    this.image = image;
     this.buffer = document.createElement("canvas");
     this.buffer.width = map.width;
     this.buffer.height = map.height;
     const context = this.buffer.getContext("2d", { willReadFrequently: true });
-    context.drawImage(image, 0, 0);
-    this.imageData = context.getImageData(0, 0, map.width, map.height);
-    const pixels = new Uint8Array(map.width * map.height);
-    for (let i = 0; i < pixels.length; i++) pixels[i] = this.imageData.data[i * 4];
-    this.paint = new MapPaint(map.width, map.height, pixels, map.negate);
+    this.paint = new MapPaint(map.width, map.height, map.cells);
+    this.displayImageData = context.createImageData(map.width, map.height);
+    this.displayImageData.data.set(renderOccupancy(map.cells, map.width, map.height));
+    context.putImageData(this.displayImageData, 0, 0);
     this.preview = null;
     this.drag = null;
+    this.lineAnchor = null;
+    this.shapePoints = [];
     this.fit();
     this.callbacks.onHistory?.();
   }
@@ -95,13 +122,21 @@ export class MapEditCanvas {
     return (this.paint?.redoStack.length ?? 0) > 0;
   }
 
-  setOptions({ mode, value, size, filled }) {
+  setOptions({ mode, value, size, filled, construction = "drag" }) {
+    if (this.mode !== mode || this.construction !== construction) {
+      this.cancelStroke();
+    }
     this.mode = mode;
     this.value = value;
     this.brushSize = Math.max(1, Math.min(50, Number(size) || 1));
     this.filled = filled;
+    this.construction = construction;
     this.updateCursor();
     this.draw();
+  }
+
+  get hasPending() {
+    return Boolean(this.drag || this.lineAnchor || this.shapePoints?.length);
   }
 
   updateCursor() {
@@ -175,113 +210,197 @@ export class MapEditCanvas {
     ctx.restore();
     if (!this.preview) return;
 
-    const { start, end, circle } = this.preview;
-    const adjusted = this.shapeEnd(start, end, circle);
-    const x0 = this.panX + start[0] * this.zoom;
-    const y0 = this.panY + start[1] * this.zoom;
-    const x1 = this.panX + adjusted[0] * this.zoom;
-    const y1 = this.panY + adjusted[1] * this.zoom;
+    const preview = this.preview;
     ctx.save();
+    ctx.translate(this.panX, this.panY);
+    ctx.scale(this.zoom, this.zoom);
     ctx.strokeStyle = "#6edcff";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 2 / this.zoom;
+    ctx.setLineDash([6 / this.zoom, 4 / this.zoom]);
     ctx.beginPath();
-    if (this.mode === "line") {
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
-    } else if (this.mode === "ellipse") {
-      ctx.ellipse(
-        (x0 + x1) / 2,
-        (y0 + y1) / 2,
-        Math.max(0.01, Math.abs(x1 - x0) / 2),
-        Math.max(0.01, Math.abs(y1 - y0) / 2),
-        0,
-        0,
-        2 * Math.PI,
-      );
+    if (preview.kind === "line") {
+      const end = snapLine45(preview.start, preview.end, preview.shift);
+      ctx.moveTo(...preview.start);
+      ctx.lineTo(...end);
+    } else if (preview.kind === "three-point") {
+      const points = preview.points;
+      if (points.length === 1) {
+        ctx.moveTo(...points[0]);
+        ctx.lineTo(...preview.end);
+      } else {
+        const frame = threePointFrame(points[0], points[1], preview.end, preview.shift);
+        if (frame) this.traceFrame(ctx, frame, preview.mode);
+      }
     } else {
-      ctx.rect(x0, y0, x1 - x0, y1 - y0);
+      const end = this.shapeEnd(preview.start, preview.end, preview.shift);
+      const x0 = preview.start[0];
+      const y0 = preview.start[1];
+      const x1 = end[0];
+      const y1 = end[1];
+      if (preview.mode === "ellipse") {
+        ctx.ellipse(
+          (x0 + x1) / 2,
+          (y0 + y1) / 2,
+          Math.max(0.01, Math.abs(x1 - x0) / 2),
+          Math.max(0.01, Math.abs(y1 - y0) / 2),
+          0,
+          0,
+          2 * Math.PI,
+        );
+      } else {
+        ctx.rect(x0, y0, x1 - x0, y1 - y0);
+      }
     }
     ctx.stroke();
     ctx.restore();
   }
 
-  /** Refresh the changed grayscale pixels without rebuilding a large canvas every move. */
+  traceFrame(ctx, frame, mode) {
+    if (mode === "rectangle") {
+      ctx.moveTo(...frame.corners[0]);
+      for (let i = 1; i < 4; i++) ctx.lineTo(...frame.corners[i]);
+      ctx.closePath();
+      return;
+    }
+    const [x, y] = frame.center;
+    const angle = Math.atan2(frame.uy, frame.ux);
+    ctx.ellipse(
+      x,
+      y,
+      frame.width / 2,
+      Math.max(0.01, Math.abs(frame.height) / 2),
+      angle,
+      0,
+      2 * Math.PI,
+    );
+  }
+
+  /** Update the display buffer only where pixels changed. */
   syncPixels(full = false) {
     if (!this.paint) return;
-    const data = this.imageData.data;
-    let indices;
-    if (full) {
-      indices = null;
-    } else {
-      indices = this.paint.drainDirty();
-      if (!indices.length) return;
-    }
-
-    let left = this.map.width;
-    let top = this.map.height;
-    let right = 0;
-    let bottom = 0;
+    const dirty = full ? null : this.paint.drainDirty();
+    if (dirty && !dirty.length) return;
+    const data = this.displayImageData.data;
+    let left = this.map.width,
+      top = this.map.height,
+      right = 0,
+      bottom = 0;
     const update = (index) => {
-      const gray = this.paint.pixels[index];
+      const gray = visualGray(this.paint.cells[index]);
       const offset = index * 4;
-      data[offset] = gray;
-      data[offset + 1] = gray;
-      data[offset + 2] = gray;
+      data[offset] = data[offset + 1] = data[offset + 2] = gray;
       data[offset + 3] = 255;
-      const x = index % this.map.width;
-      const y = Math.floor(index / this.map.width);
+      const x = index % this.map.width,
+        y = Math.floor(index / this.map.width);
       left = Math.min(left, x);
       right = Math.max(right, x);
       top = Math.min(top, y);
       bottom = Math.max(bottom, y);
     };
-
-    if (indices) {
-      for (const index of indices) update(index);
-    } else {
-      for (let index = 0; index < this.paint.pixels.length; index++) update(index);
+    if (dirty) for (const index of dirty) update(index);
+    else {
+      for (let i = 0; i < this.paint.cells.length; i++) update(i);
       this.paint.drainDirty();
     }
-    const ctx = this.buffer.getContext("2d");
-    ctx.putImageData(
-      this.imageData,
-      0,
-      0,
-      left,
-      top,
-      right - left + 1,
-      bottom - top + 1,
-    );
+    this.buffer
+      .getContext("2d")
+      .putImageData(
+        this.displayImageData,
+        0,
+        0,
+        left,
+        top,
+        right - left + 1,
+        bottom - top + 1,
+      );
     this.draw();
     this.callbacks.onHistory?.();
   }
 
-  shapeEnd(start, end, circle = false) {
-    if (!circle || this.mode !== "ellipse") return end;
+  shapeEnd(start, end, square = false) {
+    if (!square || !["rectangle", "ellipse"].includes(this.mode)) return end;
     const dx = end[0] - start[0];
     const dy = end[1] - start[1];
     const side = Math.max(Math.abs(dx), Math.abs(dy));
     return [start[0] + Math.sign(dx || 1) * side, start[1] + Math.sign(dy || 1) * side];
   }
 
-  stroke(start, end, circle = false) {
-    const value = this.paint.value(this.value);
-    if (this.mode === "brush") {
-      this.paint.line(...start, ...end, this.brushSize, value);
-    } else if (this.mode === "line") {
-      this.paint.line(...start, ...end, this.brushSize, value);
-    } else if (this.mode === "rectangle") {
-      this.paint.rectangle(...start, ...end, this.brushSize, value, this.filled);
-    } else if (this.mode === "ellipse") {
-      this.paint.ellipse(
-        ...start,
-        ...this.shapeEnd(start, end, circle),
-        this.brushSize,
-        value,
-        this.filled,
-      );
+  /** Commit one complete geometry operation as a single undo step. */
+  commitShape(operation) {
+    this.paint.begin();
+    try {
+      operation(this.paint.value(this.value));
+      this.paint.commit();
+      this.syncPixels();
+    } catch (error) {
+      this.paint.cancel();
+      this.syncPixels();
+      this.callbacks.onError?.(error);
     }
+  }
+
+  /** End a continuous line without removing committed segments. */
+  finishLineChain() {
+    this.lineAnchor = null;
+    this.preview = null;
+    this.draw();
+  }
+
+  finishLine(start, end, shift = false) {
+    const snapped = snapLine45(start, end, shift);
+    if (Math.hypot(snapped[0] - start[0], snapped[1] - start[1]) < 0.001) {
+      return start;
+    }
+    this.commitShape((value) => {
+      this.paint.line(...start, ...snapped, this.brushSize, value);
+    });
+    return snapped;
+  }
+
+  finishShape(start, end, shift = false) {
+    const adjusted = this.shapeEnd(start, end, shift);
+    this.commitShape((value) => {
+      if (this.mode === "rectangle") {
+        this.paint.rectangle(...start, ...adjusted, this.brushSize, value, this.filled);
+      } else if (this.mode === "ellipse") {
+        this.paint.ellipse(...start, ...adjusted, this.brushSize, value, this.filled);
+      }
+    });
+  }
+
+  finishThreePoint(points, shift = false) {
+    this.commitShape((value) => {
+      if (this.mode === "rectangle") {
+        this.paint.rotatedRectangle(
+          ...points,
+          this.brushSize,
+          value,
+          this.filled,
+          shift,
+        );
+      } else if (this.mode === "ellipse") {
+        this.paint.rotatedEllipse(...points, this.brushSize, value, this.filled, shift);
+      }
+    });
+  }
+
+  /** One click sets one construction point; the third commits the shape. */
+  acceptShapePoint(point, shift = false) {
+    this.shapePoints.push(point);
+    if (this.shapePoints.length === 3) {
+      this.finishThreePoint(this.shapePoints, shift);
+      this.shapePoints = [];
+    }
+    this.preview = this.shapePoints.length
+      ? {
+          kind: "three-point",
+          mode: this.mode,
+          points: [...this.shapePoints],
+          end: point,
+          shift,
+        }
+      : null;
+    this.draw();
   }
 
   pointerDown(event) {
@@ -298,8 +417,9 @@ export class MapEditCanvas {
     )
       return;
     event.preventDefault();
-    this.canvas.setPointerCapture(event.pointerId);
+    const point = raw.map(Math.round);
     if (pan) {
+      this.canvas.setPointerCapture(event.pointerId);
       this.drag = {
         type: "pan",
         pointerId: event.pointerId,
@@ -311,41 +431,68 @@ export class MapEditCanvas {
       this.updateCursor();
       return;
     }
-    const point = raw.map(Math.round);
     if (this.mode === "eyedropper") {
       const sampled = this.paint.sample(...point);
       if (sampled) this.callbacks.onSample?.(sampled);
       return;
     }
-    this.paint.begin();
     if (this.mode === "fill") {
-      try {
-        this.paint.floodFill(...point, this.paint.value(this.value));
-        this.paint.commit();
-        this.syncPixels();
-      } catch (error) {
-        this.cancelStroke();
-        this.callbacks.onError?.(error);
-      }
+      this.commitShape((value) => this.paint.floodFill(...point, value));
       return;
     }
+    if (this.mode === "line" && event.detail >= 2) {
+      this.finishLineChain();
+      return;
+    }
+    this.canvas.setPointerCapture(event.pointerId);
     this.drag = {
-      type: "paint",
+      type: this.mode === "brush" ? "brush" : "geometry",
       pointerId: event.pointerId,
-      start: point,
+      down: point,
       last: point,
-      circle: event.shiftKey,
+      x: event.offsetX,
+      y: event.offsetY,
+      moved: false,
     };
     if (this.mode === "brush") {
+      this.paint.begin();
       try {
-        this.stroke(point, point);
+        this.paint.line(
+          ...point,
+          ...point,
+          this.brushSize,
+          this.paint.value(this.value),
+        );
         this.syncPixels();
       } catch (error) {
         this.cancelStroke();
         this.callbacks.onError?.(error);
       }
+    } else if (this.mode === "line") {
+      this.preview = {
+        kind: "line",
+        start: this.lineAnchor ?? point,
+        end: point,
+        shift: event.shiftKey,
+      };
+      this.draw();
+    } else if (this.construction === "3-point") {
+      this.preview = {
+        kind: "three-point",
+        mode: this.mode,
+        points: this.shapePoints.length ? [...this.shapePoints] : [point],
+        end: point,
+        shift: event.shiftKey,
+      };
+      this.draw();
     } else {
-      this.preview = { start: point, end: point, circle: event.shiftKey };
+      this.preview = {
+        kind: "drag-shape",
+        mode: this.mode,
+        start: point,
+        end: point,
+        shift: event.shiftKey,
+      };
       this.draw();
     }
   }
@@ -353,7 +500,28 @@ export class MapEditCanvas {
   pointerMove(event) {
     const p = this.toPixel(event.offsetX, event.offsetY);
     this.callbacks.onCursor?.(p);
-    if (!this.drag || this.drag.pointerId !== event.pointerId) return;
+    if (!this.drag) {
+      if (this.lineAnchor && this.mode === "line") {
+        this.preview = {
+          kind: "line",
+          start: this.lineAnchor,
+          end: p,
+          shift: event.shiftKey || this.shiftHeld,
+        };
+        this.draw();
+      } else if (this.shapePoints.length && this.construction === "3-point") {
+        this.preview = {
+          kind: "three-point",
+          mode: this.mode,
+          points: [...this.shapePoints],
+          end: p,
+          shift: event.shiftKey || this.shiftHeld,
+        };
+        this.draw();
+      }
+      return;
+    }
+    if (this.drag.pointerId !== event.pointerId) return;
     if (this.drag.type === "pan") {
       this.panX = this.drag.panX + event.offsetX - this.drag.x;
       this.panY = this.drag.panY + event.offsetY - this.drag.y;
@@ -361,14 +529,44 @@ export class MapEditCanvas {
       return;
     }
     const point = p.map(Math.round);
+    if (Math.hypot(event.offsetX - this.drag.x, event.offsetY - this.drag.y) > 4) {
+      this.drag.moved = true;
+    }
     try {
-      if (this.mode === "brush") {
-        this.stroke(this.drag.last, point);
+      if (this.drag.type === "brush") {
+        this.paint.line(
+          ...this.drag.last,
+          ...point,
+          this.brushSize,
+          this.paint.value(this.value),
+        );
         this.drag.last = point;
         this.syncPixels();
+      } else if (this.mode === "line") {
+        this.preview = {
+          kind: "line",
+          start: this.lineAnchor ?? this.drag.down,
+          end: point,
+          shift: event.shiftKey || this.shiftHeld,
+        };
+        this.draw();
+      } else if (this.construction === "3-point") {
+        this.preview = {
+          kind: "three-point",
+          mode: this.mode,
+          points: this.shapePoints.length ? [...this.shapePoints] : [this.drag.down],
+          end: point,
+          shift: event.shiftKey || this.shiftHeld,
+        };
+        this.draw();
       } else {
-        this.drag.circle = event.shiftKey;
-        this.preview = { start: this.drag.start, end: point, circle: event.shiftKey };
+        this.preview = {
+          kind: "drag-shape",
+          mode: this.mode,
+          start: this.drag.down,
+          end: point,
+          shift: event.shiftKey || this.shiftHeld,
+        };
         this.draw();
       }
     } catch (error) {
@@ -379,21 +577,41 @@ export class MapEditCanvas {
 
   pointerUp(event) {
     if (!this.drag || this.drag.pointerId !== event.pointerId) return;
-    if (this.drag.type === "pan") {
-      this.drag = null;
-      this.updateCursor();
+    const drag = this.drag;
+    this.drag = null;
+    this.updateCursor();
+    if (drag.type === "pan") return;
+    if (this.mode === "line" && !drag.moved && event.detail >= 2) {
+      this.finishLineChain();
       return;
     }
     try {
-      if (this.mode !== "brush") {
-        const end = this.toPixel(event.offsetX, event.offsetY).map(Math.round);
-        this.stroke(this.drag.start, end, event.shiftKey);
+      const point = this.toPixel(event.offsetX, event.offsetY).map(Math.round);
+      const shift = event.shiftKey || this.shiftHeld;
+      if (drag.type === "brush") {
+        this.paint.commit();
+      } else if (this.mode === "line") {
+        if (drag.moved) {
+          this.finishLine(this.lineAnchor ?? drag.down, point, shift);
+          this.lineAnchor = null;
+        } else if (this.lineAnchor) {
+          this.lineAnchor = this.finishLine(this.lineAnchor, point, shift);
+        } else {
+          this.lineAnchor = drag.down;
+        }
+        this.preview = this.lineAnchor
+          ? { kind: "line", start: this.lineAnchor, end: this.lineAnchor, shift }
+          : null;
+      } else if (this.construction === "3-point") {
+        if (drag.moved && !this.shapePoints.length) {
+          this.shapePoints.push(drag.down);
+        }
+        this.acceptShapePoint(point, shift);
+      } else {
+        this.finishShape(drag.down, point, shift);
+        this.preview = null;
       }
-      this.paint.commit();
-      this.preview = null;
-      this.drag = null;
-      this.updateCursor();
-      this.syncPixels();
+      this.draw();
       this.callbacks.onHistory?.();
     } catch (error) {
       this.cancelStroke();
@@ -405,17 +623,23 @@ export class MapEditCanvas {
     this.paint?.cancel();
     this.drag = null;
     this.preview = null;
+    this.lineAnchor = null;
+    this.shapePoints = [];
     this.updateCursor();
     this.syncPixels();
+    // syncPixels skips rendering when no pixels changed; clear stale previews anyway.
+    this.draw();
   }
 
   undo() {
+    this.cancelStroke();
     if (!this.paint?.undo()) return false;
     this.syncPixels();
     return true;
   }
 
   redo() {
+    this.cancelStroke();
     if (!this.paint?.redo()) return false;
     this.syncPixels();
     return true;
@@ -423,17 +647,8 @@ export class MapEditCanvas {
 
   reset() {
     if (!this.paint) return;
+    this.cancelStroke();
     this.paint.reset();
     this.syncPixels(true);
-  }
-
-  toBlob() {
-    return new Promise((resolve, reject) => {
-      if (!this.buffer) return reject(Error("No map loaded"));
-      this.buffer.toBlob(
-        (blob) => (blob ? resolve(blob) : reject(Error("PNG encoding failed"))),
-        "image/png",
-      );
-    });
   }
 }

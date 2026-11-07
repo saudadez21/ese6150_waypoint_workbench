@@ -1,4 +1,5 @@
-import { insertion } from "./geometry.js";
+import { insertion, imageToWorld, worldToImage } from "./geometry.js";
+import { renderOccupancy } from "./map_codec.js";
 import { selectedIndices } from "./tracks.js";
 
 /** Renders ROS map coordinates and editable waypoint tracks. */
@@ -70,9 +71,21 @@ export class MapCanvas {
     return this.canvas.clientHeight;
   }
 
-  setMap(map, image) {
+  setMap(map) {
     this.map = map;
-    this.image = image;
+    if (!map) {
+      this.image = null;
+      this.fit();
+      return;
+    }
+    const buffer = document.createElement("canvas");
+    buffer.width = map.width;
+    buffer.height = map.height;
+    const ctx = buffer.getContext("2d");
+    const image = ctx.createImageData(map.width, map.height);
+    image.data.set(renderOccupancy(map.cells, map.width, map.height));
+    ctx.putImageData(image, 0, 0);
+    this.image = buffer;
     this.fit();
   }
 
@@ -155,28 +168,14 @@ export class MapCanvas {
   }
 
   toPixelWorld([x, y]) {
-    if (!this.map) return [x * 20, -y * 20];
-    const [ox, oy, yaw] = this.map.origin;
-    const dx = x - ox,
-      dy = y - oy;
-    return [
-      (Math.cos(yaw) * dx + Math.sin(yaw) * dy) / this.map.resolution,
-      this.map.height -
-        1 -
-        (-Math.sin(yaw) * dx + Math.cos(yaw) * dy) / this.map.resolution,
-    ];
+    return this.map ? worldToImage(this.map, x, y) : [x * 20, -y * 20];
   }
 
   toWorld(x, y) {
     const pixel = this.toPixel(x, y);
-    if (!this.map) return [pixel[0] / 20, -pixel[1] / 20];
-    const [ox, oy, yaw] = this.map.origin;
-    const dx = pixel[0] * this.map.resolution;
-    const dy = (this.map.height - 1 - pixel[1]) * this.map.resolution;
-    return [
-      ox + Math.cos(yaw) * dx - Math.sin(yaw) * dy,
-      oy + Math.sin(yaw) * dx + Math.cos(yaw) * dy,
-    ];
+    return this.map
+      ? imageToWorld(this.map, ...pixel)
+      : [pixel[0] / 20, -pixel[1] / 20];
   }
 
   screen(point) {
@@ -199,6 +198,19 @@ export class MapCanvas {
       .join(",")})`;
   }
 
+  speedRange() {
+    let low = Infinity,
+      high = -Infinity;
+    for (const track of this.workspace?.items ?? []) {
+      if (!track.visible || !Array.isArray(track.speed)) continue;
+      for (const value of track.speed) {
+        low = Math.min(low, value);
+        high = Math.max(high, value);
+      }
+    }
+    return Number.isFinite(low) ? [low, high] : [0, 1];
+  }
+
   drawPath(track, active, referenceIndex) {
     const { points } = track;
     if (points.length < 2) return;
@@ -209,19 +221,8 @@ export class MapCanvas {
       points[0][1] - points.at(-1)[1],
     );
     const closed = gap <= this.closureLimit;
-    const useSpeed =
-      active &&
-      this.workspace.items.length === 1 &&
-      this.display === "speed" &&
-      Array.isArray(track.speed);
-    let low = Infinity,
-      high = -Infinity;
-    if (useSpeed) {
-      for (const value of track.speed) {
-        low = Math.min(low, value);
-        high = Math.max(high, value);
-      }
-    }
+    const useSpeed = this.display === "speed" && Array.isArray(track.speed);
+    const [low, high] = this.speedRange();
     ctx.save();
     ctx.lineWidth = active ? 3.2 : 1.8;
     ctx.lineCap = "round";
@@ -233,7 +234,9 @@ export class MapCanvas {
     for (let i = 0; i < (closed ? points.length : points.length - 1); i++) {
       ctx.strokeStyle = useSpeed
         ? this.speedColor((track.speed[i] - low) / (high - low || 1))
-        : track.color;
+        : this.display === "speed"
+          ? "#94a3b8"
+          : track.color;
       ctx.beginPath();
       ctx.moveTo(...screen[i]);
       ctx.lineTo(...screen[(i + 1) % screen.length]);
@@ -337,8 +340,7 @@ export class MapCanvas {
     if (this.tooltip) this.tooltip.classList.add("hidden");
   }
 
-  showTooltip(index, x, y) {
-    const track = this.workspace?.active;
+  showTooltip(index, x, y, track = this.workspace?.active) {
     if (!this.tooltip || !track || index == null) {
       this.hideTooltip();
       return;
@@ -348,7 +350,8 @@ export class MapCanvas {
       Array.isArray(track.speed) && Number.isFinite(track.speed[index])
         ? `\nv: ${track.speed[index].toFixed(3)} m/s`
         : "";
-    this.tooltip.textContent = `Point #${index}\nX: ${point[0].toFixed(
+    const label = this.display === "speed" ? `${track.filename}\n` : "";
+    this.tooltip.textContent = `${label}Point #${index}\nX: ${point[0].toFixed(
       3,
     )} m · Y: ${point[1].toFixed(3)} m${speed}`;
     this.tooltip.classList.remove("hidden");
@@ -362,6 +365,23 @@ export class MapCanvas {
       8,
       Math.min(y + 14, this.height() - height - 8),
     )}px`;
+  }
+
+  nearbyVisibleTrack(x, y) {
+    let best = null,
+      distance = 10;
+    for (const track of this.workspace?.items ?? []) {
+      if (!track.visible || !Array.isArray(track.speed)) continue;
+      for (let i = 0; i < track.points.length; i++) {
+        const pixel = this.screen(track.points[i]);
+        const delta = Math.hypot(pixel[0] - x, pixel[1] - y);
+        if (delta < distance) {
+          best = { track, index: i };
+          distance = delta;
+        }
+      }
+    }
+    return best;
   }
 
   nearby(x, y) {
@@ -415,6 +435,7 @@ export class MapCanvas {
       return;
     }
     const track = this.workspace?.active;
+    if (this.display === "speed") return;
     if (this.mode === "add" && track) {
       event.preventDefault();
       const point = this.toWorld(event.offsetX, event.offsetY);
@@ -472,12 +493,22 @@ export class MapCanvas {
     const point = this.toWorld(event.offsetX, event.offsetY);
     this.cb.onCursor?.(point);
     if (!this.drag) {
-      if (this.mode === "select" && this.display !== "speed" && !this.spaceHeld) {
-        this.showTooltip(
-          this.nearby(event.offsetX, event.offsetY),
-          event.offsetX,
-          event.offsetY,
-        );
+      if (this.mode === "select" && !this.spaceHeld) {
+        if (this.display === "speed") {
+          const hovered = this.nearbyVisibleTrack(event.offsetX, event.offsetY);
+          this.showTooltip(
+            hovered?.index,
+            event.offsetX,
+            event.offsetY,
+            hovered?.track,
+          );
+        } else {
+          this.showTooltip(
+            this.nearby(event.offsetX, event.offsetY),
+            event.offsetX,
+            event.offsetY,
+          );
+        }
       } else this.hideTooltip();
       return;
     }

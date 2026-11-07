@@ -5,14 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "waypoint-workbench"
 version = "0.3.0"
-description = "Offline F1TENTH waypoint editing and ROS 2 recording"
+description = "F1TENTH waypoint visualization, ROS map editing, and ROS 2 recording"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "Flask>=2.3,<4",
-    "numpy>=1.24",
-    "scipy>=1.10",
-        "Pillow>=9.0",
+    "Pillow>=9.0",
     "PyYAML>=6.0",
     "tomli>=2; python_version < '3.11'",
 ]
@@ -22,6 +20,10 @@ dev = [
     "pytest>=7.0",
     "ruff==0.14.6",
     "pre-commit>=4.0,<5",
+]
+scripts = [
+    "numpy>=1.24",
+    "scipy>=1.10",
 ]
 
 [tool.setuptools]
@@ -38,7 +40,7 @@ pythonpath = ["src", "."]
 [tool.ruff]
 line-length = 88
 indent-width = 4
-# ROS 2 Humble commonly uses Python 3.10; do not assume Python 3.13 features.
+# Target Python 3.10 for ROS 2 Humble.
 target-version = "py310"
 include = ["*.py", "*.pyi"]
 

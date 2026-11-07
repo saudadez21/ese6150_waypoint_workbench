@@ -13,7 +13,7 @@ function canonical(raw, aliases = {}) {
     .replace(/^\ufeff/, "")
     .trim()
     .toLowerCase();
-  return aliases[name] || (["x", "y", "yaw", "v"].includes(name) ? name : "other");
+  return aliases[name] || (["x", "y", "v"].includes(name) ? name : null);
 }
 
 export function targetFor(name, aliases = {}) {
@@ -113,12 +113,12 @@ export function parseCSV(text, aliases = {}, limit = 20000) {
       throw Error(`Multiple columns map to ${key}; check Config aliases`);
     }
   }
-  // Additional heading or speed aliases are retained, not used as duplicate inputs.
-  for (const key of ["yaw", "v"]) {
+  // Only the first recognized speed column is used for visualization.
+  for (const key of ["v"]) {
     let found = false;
     for (let i = 0; i < targets.length; i++) {
       if (targets[i] === key) {
-        if (found) targets[i] = "other";
+        if (found) targets[i] = null;
         found = true;
       }
     }
@@ -160,10 +160,6 @@ export function parseCSV(text, aliases = {}, limit = 20000) {
     speed: validSpeed ? speed : null,
     originalCSV: text,
     columns: [...header],
-    otherColumns: header.filter((_, index) => targets[index] === "other"),
-    extraRows: body.map((row) => [...row]),
-    headerKind,
-    delimiter,
   };
 }
 

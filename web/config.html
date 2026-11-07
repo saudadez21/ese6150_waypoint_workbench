@@ -49,19 +49,8 @@
             <h2>EDITOR</h2>
             <label for="closureGap">Closure gap (m)</label
             ><input id="closureGap" type="number" min="0.001" max="50" step="any" />
-            <label for="undoLimit">Undo limit</label
-            ><input id="undoLimit" type="number" min="1" max="500" />
-          </section>
-          <section class="settings-card">
-            <div class="heading-row">
-              <h2>TRACK COLORS</h2>
-              <button type="button" class="button subtle small" id="resetColors">
-                Defaults
-              </button>
-            </div>
-            <div id="colors" class="colors"></div>
-            <button type="button" class="button wide" id="addColor">+ Add Track</button
-            ><small id="colorCount" class="muted"></small>
+            <label for="maxTracks">Max tracks (1–64)</label
+            ><input id="maxTracks" type="number" min="1" max="64" step="1" required />
           </section>
           <section class="settings-card aliases-card">
             <div class="heading-row">
@@ -86,7 +75,9 @@
             </div>
             <div id="aliasRows"></div>
             <button type="button" class="button wide" id="addAlias">
-              + Add Mapping
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#plus"></use></svg
+              ><span>Add Mapping</span>
             </button>
           </section>
         </div>

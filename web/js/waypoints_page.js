@@ -1,5 +1,7 @@
 import { initSidebar } from "./sidebar.js";
+import { initFileDrop } from "./file_drop.js";
 import { initHelp } from "./help.js";
+import { createIcon } from "./icons.js";
 import { Api, sameBytes } from "./api.js";
 import { CsvColumnsError, parseCSV, writeCSV } from "./csv.js";
 import { Tracks, selectedIndices } from "./tracks.js";
@@ -117,9 +119,10 @@ function renderSelection() {
     "deletePoint",
     "clearSelection",
   ]) {
-    $(id).disabled = !count;
+    $(id).disabled = !count || display === "speed";
   }
-  $("setStart").disabled = count !== 1;
+  $("setStart").disabled =
+    count !== 1 || !tracks.measurements().closed || display === "speed";
   const key = `${track?.id ?? ""}:${indices.join(",")}`;
   if (key !== lastSelectionKey) {
     $("deltaX").value = "0";
@@ -155,27 +158,37 @@ function renderTracks() {
       track.color = color.value;
       canvas.draw();
     };
-    const content = document.createElement("span");
-    content.className = "track-name";
-    content.textContent = track.filename;
+    card.classList.toggle("track-hidden", !track.visible);
+    const content = document.createElement("div");
+    content.className = "track-details";
+    const filename = document.createElement("span");
+    filename.className = "track-filename";
+    filename.textContent = track.filename;
+    filename.title = track.filename;
     const small = document.createElement("small");
     small.className = "track-meta";
     small.textContent = `${track.points.length} points${
       track.dirty ? " · modified" : ""
     }`;
-    content.append(small);
+    content.append(filename, small);
     const eye = document.createElement("button");
-    eye.textContent = track.visible ? "◉" : "○";
+    eye.type = "button";
+    eye.className = "track-action";
+    eye.append(createIcon(track.visible ? "eye" : "eye-off"));
     eye.title = track.visible ? "Hide track" : "Show track";
     eye.setAttribute("aria-label", eye.title);
+    eye.setAttribute("aria-pressed", String(track.visible));
     eye.onclick = (e) => {
       e.stopPropagation();
       track.visible = !track.visible;
       render();
     };
     const remove = document.createElement("button");
-    remove.textContent = "×";
-    remove.title = "Remove track";
+    remove.type = "button";
+    remove.className = "track-action";
+    remove.append(createIcon("x"));
+    remove.title = "Close track";
+    remove.setAttribute("aria-label", "Close track");
     remove.onclick = (e) => {
       e.stopPropagation();
       if (track.dirty && !confirm(`Discard edits to ${track.filename}?`)) return;
@@ -185,25 +198,28 @@ function renderTracks() {
     card.append(color, content, eye, remove);
     target.append(card);
   }
-  $("trackCount").textContent =
-    `${tracks.items.length} / ${config.colors.length} tracks`;
+  $("trackCount").textContent = `${tracks.items.length} / ${config.maxTracks} tracks`;
 }
 
 function render() {
+  document
+    .querySelectorAll("[data-api-only]")
+    .forEach((element) => element.classList.toggle("hidden", !api.online));
+  $("emptyState").classList.toggle("hidden", Boolean(activeMap || tracks.items.length));
   canvas.hideTooltip();
   const track = tracks.active;
   renderTracks();
   renderSelection();
   $("download").disabled = !track || track.points.length < 2;
-  $("reverse").disabled = !track || track.points.length < 2;
-  $("reset").disabled = !track;
+  $("reverse").disabled = !track || track.points.length < 2 || display === "speed";
+  $("reset").disabled = !track || display === "speed";
   $("refreshMaps").disabled = !api.online;
   $("refreshWaypoints").disabled = !api.online;
   $("mapFiles").disabled = !api.online || $("mapFiles").options.length <= 1;
   $("waypointFiles").disabled = !api.online || $("waypointFiles").options.length <= 1;
   updateFileButtons();
-  $("undo").disabled = !track?.undo.length;
-  $("redo").disabled = !track?.redo.length;
+  $("undo").disabled = !track?.undo.length || display === "speed";
+  $("redo").disabled = !track?.redo.length || display === "speed";
   $("uploadWaypoint").disabled =
     !track ||
     track.points.length < 2 ||
@@ -213,7 +229,10 @@ function render() {
     !activeMap ||
     !api.online ||
     !(api.capabilities.map_create || api.capabilities.map_replace);
-  const speed = tracks.items.length === 1 && Array.isArray(track?.speed);
+  const speedTracks = tracks.items.filter(
+    (item) => item.visible && Array.isArray(item.speed),
+  );
+  const speed = speedTracks.length > 0;
   const speedInput = document.querySelector('[name="display"][value="speed"]');
   speedInput.disabled = !speed;
   if (!speed && display === "speed") {
@@ -223,8 +242,9 @@ function render() {
   canvas.display = display;
   $("legend").classList.toggle("hidden", display !== "speed");
   if (speed && display === "speed") {
-    $("lowSpeed").textContent = `${Math.min(...track.speed).toFixed(2)} m/s`;
-    $("highSpeed").textContent = `${Math.max(...track.speed).toFixed(2)} m/s`;
+    const [low, high] = canvas.speedRange();
+    $("lowSpeed").textContent = `${low.toFixed(2)} m/s`;
+    $("highSpeed").textContent = `${high.toFixed(2)} m/s`;
   }
   const { length, gap, closed } = tracks.measurements();
   $("measurements").textContent = track
@@ -264,9 +284,7 @@ async function refresh(kind) {
 function updateFileButtons() {
   $("loadApiMap").disabled = !api.online || !$("mapFiles").value;
   $("loadApiWaypoint").disabled =
-    !api.online ||
-    !$("waypointFiles").value ||
-    tracks.items.length >= config.colors.length;
+    !api.online || !$("waypointFiles").value || tracks.items.length >= config.maxTracks;
 }
 
 async function openMap(map, source) {
@@ -289,7 +307,10 @@ function showMapInfo(message = "") {
 async function importMapFiles(files) {
   const result = await mapImporter.add(files);
   if (result.map) await openMap(result.map, { type: "local" });
-  else showMapInfo(result.message);
+  else {
+    showMapInfo(result.message);
+    if (result.error) notice(result.message, true);
+  }
 }
 
 async function openCSV(text, filename, source) {
@@ -300,7 +321,9 @@ async function openCSV(text, filename, source) {
 }
 
 async function importFiles(files) {
-  const mapItems = files.filter((file) => /\.(ya?ml|pgm|png|zip)$/i.test(file.name));
+  const mapItems = files.filter((file) =>
+    /\.(ya?ml|pgm|png|bmp|zip)$/i.test(file.name),
+  );
   if (mapItems.length) await importMapFiles(mapItems);
   for (const file of files.filter((item) => /\.csv$/i.test(item.name))) {
     await openCSV(await file.text(), file.name, { type: "local" });
@@ -317,11 +340,13 @@ async function uploadWaypoint() {
     if (!api.capabilities.waypoint_create) throw Error("Waypoint creation is disabled");
     const result = await api.uploadWaypoint(name, text);
     track.source = { type: "api", name, etag: result.etag };
-    track.dirty = false;
+    tracks.checkpoint(track, text);
     notice(`Uploaded ${name}`);
   } else {
     const remote = await api.waypoint(name);
     if (remote.text === text) {
+      track.source = { type: "api", name, etag: remote.etag };
+      tracks.checkpoint(track, text);
       notice("Waypoint is up to date");
       return;
     }
@@ -330,11 +355,22 @@ async function uploadWaypoint() {
     if (track.source?.type === "api" && track.source.etag !== remote.etag) {
       throw Error("Server file changed since it was loaded. Reload before replacing.");
     }
-    if (!confirm(`Replace ${name} on the API? The previous CSV will be backed up.`))
+    const xyWarning =
+      track.dirty &&
+      remote.text
+        .split(/\r?\n/)
+        .some((line) => line.trim() && line.split(/[,;]/).length > 2)
+        ? " The edited upload contains X/Y only; the existing additional columns will be removed."
+        : "";
+    if (
+      !confirm(
+        `Replace ${name} on the API? The previous CSV will be backed up.${xyWarning}`,
+      )
+    )
       return;
     const result = await api.uploadWaypoint(name, text, remote.etag);
     track.source = { type: "api", name, etag: result.etag };
-    track.dirty = false;
+    tracks.checkpoint(track, text);
     notice(`Replaced ${name} · backup created`);
   }
   await refresh("waypoints");
@@ -380,6 +416,7 @@ async function uploadMap() {
 }
 
 function setTool(mode) {
+  if (display === "speed" && !["pan", "select"].includes(mode)) return;
   document
     .querySelectorAll("[data-mode]")
     .forEach((button) =>
@@ -540,6 +577,7 @@ async function main() {
   document.querySelectorAll('[name="display"]').forEach((input) =>
     input.addEventListener("change", () => {
       display = input.value;
+      if (display === "speed") setTool("select");
       render();
     }),
   );
@@ -556,12 +594,12 @@ async function main() {
     )
       return;
     const mod = event.ctrlKey || event.metaKey;
-    if (mod && event.key.toLowerCase() === "z") {
+    if (display !== "speed" && mod && event.key.toLowerCase() === "z") {
       event.preventDefault();
       if (event.shiftKey) tracks.redo();
       else tracks.undo();
       render();
-    } else if (mod && event.key.toLowerCase() === "y") {
+    } else if (display !== "speed" && mod && event.key.toLowerCase() === "y") {
       event.preventDefault();
       tracks.redo();
       render();
@@ -578,7 +616,8 @@ async function main() {
       render();
     } else if (
       ["Delete", "Backspace"].includes(event.key) &&
-      selectedIndices(tracks.active).length
+      selectedIndices(tracks.active).length &&
+      display !== "speed"
     ) {
       event.preventDefault();
       run(() => {
@@ -599,18 +638,7 @@ async function main() {
       event.returnValue = "";
     }
   });
-  document.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    $("dropZone").classList.remove("hidden");
-  });
-  document.addEventListener("dragleave", (event) => {
-    if (!event.relatedTarget) $("dropZone").classList.add("hidden");
-  });
-  document.addEventListener("drop", (event) => {
-    event.preventDefault();
-    $("dropZone").classList.add("hidden");
-    run(() => importFiles([...event.dataTransfer.files]));
-  });
+  initFileDrop($("dropZone"), (files) => run(() => importFiles(files)));
   render();
 }
 main().catch((error) => notice(error.message, true));

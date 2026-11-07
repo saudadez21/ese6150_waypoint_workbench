@@ -1,4 +1,5 @@
 import { stats } from "./geometry.js";
+import { nextTrackColor } from "./preferences.js";
 
 const copy = (value) => structuredClone(value);
 
@@ -25,13 +26,10 @@ export class Tracks {
   }
 
   add(parsed, filename, source = { type: "local" }) {
-    if (this.items.length >= this.config.colors.length) {
-      throw Error(`Maximum ${this.config.colors.length} tracks (add colors in Config)`);
+    if (this.items.length >= this.config.maxTracks) {
+      throw Error(`Maximum ${this.config.maxTracks} tracks`);
     }
-    const used = new Set(this.items.map((track) => track.color));
-    const color =
-      this.config.colors.find((candidate) => !used.has(candidate)) ||
-      this.config.colors[0];
+    const color = nextTrackColor(this.items.map((track) => track.color));
     const track = {
       ...parsed,
       id: this.nextId++,
@@ -45,7 +43,11 @@ export class Tracks {
       undo: [],
       redo: [],
       dirty: false,
-      baseline: copy(parsed),
+      baseline: copy({
+        points: parsed.points,
+        speed: parsed.speed,
+        originalCSV: parsed.originalCSV,
+      }),
     };
     this.items.push(track);
     this.select(track.id);
@@ -65,11 +67,6 @@ export class Tracks {
         points: [],
         speed: null,
         originalCSV: null,
-        columns: ["x", "y"],
-        otherColumns: [],
-        extraRows: null,
-        headerKind: "normal",
-        delimiter: ",",
       },
       filename,
     );
@@ -144,18 +141,34 @@ export class Tracks {
   snapshot(track) {
     return {
       points: copy(track.points),
-      speed: copy(track.speed),
-      originalCSV: track.originalCSV,
-      extraRows: copy(track.extraRows),
-      otherColumns: copy(track.otherColumns),
-      columns: copy(track.columns),
-      headerKind: track.headerKind,
-      delimiter: track.delimiter,
       selected: track.selected,
       selection: copy(selectedIndices(track)),
       anchor: track.anchor,
-      dirty: track.dirty,
     };
+  }
+
+  /** Compare edits with the latest saved checkpoint. */
+  reconcile(track) {
+    const baseline = track.baseline.points;
+    const equal =
+      track.points.length === baseline.length &&
+      track.points.every(
+        (point, i) => point[0] === baseline[i][0] && point[1] === baseline[i][1],
+      );
+    track.dirty = !equal;
+    track.originalCSV = equal ? track.baseline.originalCSV : null;
+    track.speed = equal ? copy(track.baseline.speed) : null;
+  }
+
+  checkpoint(track = this.active, csv = track?.originalCSV) {
+    if (!track) return;
+    // Reset returns to the latest saved track.
+    track.baseline = copy({
+      points: track.points,
+      speed: track.speed,
+      originalCSV: csv,
+    });
+    this.reconcile(track);
   }
 
   mutate(operation) {
@@ -163,18 +176,12 @@ export class Tracks {
     if (!track) return;
     const before = this.snapshot(track);
     operation(track);
-    // Geometry and point ordering changes invalidate all dependent CSV columns.
-    track.speed = null;
-    track.originalCSV = null;
-    track.extraRows = null;
-    track.otherColumns = [];
-    track.columns = ["x", "y"];
     track.selected = null;
     track.selection = [];
     track.anchor = null;
-    track.dirty = true;
+    this.reconcile(track);
     track.undo.push(before);
-    if (track.undo.length > this.config.undoLimit) track.undo.shift();
+    if (track.undo.length > 100) track.undo.shift();
     track.redo = [];
   }
 
@@ -183,6 +190,7 @@ export class Tracks {
     if (!track?.undo.length) return false;
     track.redo.push(this.snapshot(track));
     Object.assign(track, track.undo.pop());
+    this.reconcile(track);
     return true;
   }
 
@@ -191,15 +199,17 @@ export class Tracks {
     if (!track?.redo.length) return false;
     track.undo.push(this.snapshot(track));
     Object.assign(track, track.redo.pop());
+    this.reconcile(track);
     return true;
   }
 
   reset() {
     const track = this.active;
-    if (!track) return;
-    this.mutate((item) => Object.assign(item, copy(item.baseline)));
-    Object.assign(track, copy(track.baseline));
-    track.dirty = false;
+    if (!track || !track.dirty) return;
+    this.mutate((item) => {
+      item.points = copy(item.baseline.points);
+    });
+    this.reconcile(track);
   }
 
   movePoint(index, point) {
@@ -264,6 +274,9 @@ export class Tracks {
 
   setStart(index) {
     if (index == null) return;
+    if (!stats(this.active?.points, this.config.closureGap).closed) {
+      throw Error("Set Start requires a closed track");
+    }
     this.mutate((track) => {
       track.points = track.points.slice(index).concat(track.points.slice(0, index));
     });

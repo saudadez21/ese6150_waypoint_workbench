@@ -28,10 +28,32 @@
           title="Keyboard shortcuts"
         >
           ?</button
-        ><button class="button subtle" id="undo" disabled>Undo</button
-        ><button class="button subtle" id="redo" disabled>Redo</button
+        ><button
+          class="button subtle icon-only"
+          id="undo"
+          disabled
+          aria-label="Undo"
+          title="Undo"
+        >
+          <svg class="button-symbol" aria-hidden="true">
+            <use href="./assets/icons.svg#undo-2"></use>
+          </svg></button
+        ><button
+          class="button subtle icon-only"
+          id="redo"
+          disabled
+          aria-label="Redo"
+          title="Redo"
+        >
+          <svg class="button-symbol" aria-hidden="true">
+            <use href="./assets/icons.svg#redo-2"></use>
+          </svg></button
         ><button class="button subtle" id="reset" disabled>Reset</button
-        ><button class="button primary" id="downloadMap" disabled>Download ZIP</button>
+        ><button class="button primary" id="downloadMap" disabled>
+          <svg class="button-symbol" aria-hidden="true">
+            <use href="./assets/icons.svg#download"></use></svg
+          ><span>Download ZIP</span>
+        </button>
       </div>
     </header>
     <div class="layout">
@@ -45,28 +67,54 @@
             aria-label="Collapse sidebar"
             title="Collapse sidebar"
           >
-            ‹
+            <svg class="button-symbol" aria-hidden="true">
+              <use href="./assets/icons.svg#panel-left-close"></use>
+            </svg>
           </button>
         </div>
         <div class="sidebar-content">
           <section>
-            <h2>MAP</h2>
-            <label for="mapFiles">API maps</label>
-            <select id="mapFiles" disabled>
-              <option value="">No API connection</option>
-            </select>
-            <div class="button-row">
-              <button class="button" id="loadApiMap" disabled>Load</button
-              ><button class="button subtle" id="refreshMaps" disabled>Refresh</button>
+            <div class="section-title-row">
+              <h2>MAP</h2>
+              <button
+                class="button refresh-button hidden"
+                id="refreshMaps"
+                type="button"
+                data-api-only
+                disabled
+                aria-label="Refresh maps"
+                title="Refresh maps"
+              >
+                <svg class="button-symbol" aria-hidden="true">
+                  <use href="./assets/icons.svg#refresh-cw"></use>
+                </svg>
+              </button>
             </div>
-            <div class="button-row">
-              <button class="button" id="newMap">New</button
-              ><button class="button" id="importMap">Import Map</button>
+            <div class="api-controls hidden" data-api-only>
+              <label for="mapFiles">API maps</label>
+              <select id="mapFiles" disabled>
+                <option value="">No API connection</option>
+              </select>
+              <button class="button wide" id="loadApiMap" disabled>
+                <svg class="button-symbol" aria-hidden="true">
+                  <use href="./assets/icons.svg#folder-down"></use></svg
+                ><span>Load</span>
+              </button>
             </div>
+            <button class="button wide" id="newMap">
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#plus"></use></svg
+              ><span>New</span>
+            </button>
+            <button class="button wide primary" id="importMap">
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#folder-open"></use></svg
+              ><span>Import Map</span>
+            </button>
             <input
               id="mapInput"
               type="file"
-              accept=".yaml,.pgm,.png,.zip"
+              accept=".yaml,.yml,.pgm,.png,.bmp,.zip"
               multiple
               hidden
             />
@@ -74,6 +122,29 @@
             <button class="button small subtle hidden" id="clearPendingMap">
               Clear pending import
             </button>
+          </section>
+          <section class="properties-section hidden" id="mapPropertiesSection">
+            <details class="map-properties" id="mapProperties">
+              <summary>PROPERTIES</summary>
+              <dl class="property-list">
+                <dt>Image</dt>
+                <dd id="propertyImage">—</dd>
+                <dt>Size</dt>
+                <dd id="propertySize">—</dd>
+                <dt>Resolution</dt>
+                <dd id="propertyResolution">—</dd>
+                <dt>Origin</dt>
+                <dd id="propertyOrigin">—</dd>
+                <dt>Negate</dt>
+                <dd id="propertyNegate">—</dd>
+                <dt>Occupied threshold</dt>
+                <dd id="propertyOccupied">—</dd>
+                <dt>Free threshold</dt>
+                <dd id="propertyFree">—</dd>
+                <dt>Mode</dt>
+                <dd id="propertyMode">—</dd>
+              </dl>
+            </details>
           </section>
           <section>
             <h2>PAINT</h2>
@@ -86,7 +157,7 @@
             <label for="paintShape">Tool</label>
             <select
               id="paintShape"
-              title="Right-drag or Space + drag to pan; Shift + Ellipse for a circle"
+              title="Right-drag or Space + drag to pan; Shift constrains shapes"
             >
               <option value="brush">Brush</option>
               <option value="line">Line</option>
@@ -96,8 +167,15 @@
               <option value="eyedropper">Eyedropper</option>
               <option value="pan">Pan</option>
             </select>
-            <label for="brushSize">Size: <span id="brushLabel">7</span> px</label>
-            <input id="brushSize" type="range" min="1" max="50" value="7" />
+            <div id="constructionSettings" class="hidden">
+              <label for="constructionMode">Construction</label>
+              <select id="constructionMode">
+                <option value="drag">Drag</option>
+                <option value="3-point">3-Point</option>
+              </select>
+            </div>
+            <label for="brushSize">Size: <span id="brushLabel">3</span> px</label>
+            <input id="brushSize" type="range" min="1" max="50" value="3" />
             <label class="checkbox"
               ><input id="fillShape" type="checkbox" /> Filled shape</label
             >
@@ -113,7 +191,9 @@
               spellcheck="false"
             />
             <button class="button primary wide" id="downloadAside" disabled>
-              Download ZIP
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#download"></use></svg
+              ><span>Download ZIP</span>
             </button>
           </section>
         </div>
@@ -138,7 +218,24 @@
         </div>
         <div class="canvas-wrap">
           <canvas id="canvas" tabindex="0" aria-label="Map canvas"></canvas>
-          <div id="dropZone" class="drop-zone hidden">Drop YAML + image or ZIP</div>
+          <div class="canvas-empty" id="emptyState" role="note">
+            <div class="import-symbol" aria-hidden="true">
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#file-up"></use>
+              </svg>
+            </div>
+            <strong>Drop files to import</strong>
+            <span>YAML + PGM/PNG/BMP · ZIP</span>
+          </div>
+          <div id="dropZone" class="drop-zone hidden" aria-hidden="true">
+            <div class="import-symbol" aria-hidden="true">
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#file-up"></use>
+              </svg>
+            </div>
+            <strong>Drop files to import</strong>
+            <span>YAML + PGM/PNG/BMP · ZIP</span>
+          </div>
         </div>
         <footer class="canvas-footer">
           <span id="status">No map loaded</span><span id="cursor">Pixel X — · Y —</span>

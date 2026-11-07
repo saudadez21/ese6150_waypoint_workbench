@@ -26,11 +26,11 @@ export class MapImportSession {
       return { map, message: "" };
     }
 
-    if (files.some((file) => !/\.(?:ya?ml|pgm|png)$/i.test(file.name))) {
-      throw Error("Select YAML, PGM, PNG, or a map ZIP");
+    if (files.some((file) => !/\.(?:ya?ml|pgm|png|bmp)$/i.test(file.name))) {
+      throw Error("Select YAML, PGM, PNG, BMP, or a map ZIP");
     }
     const yamls = files.filter((file) => /\.ya?ml$/i.test(file.name));
-    const images = files.filter((file) => /\.(?:pgm|png)$/i.test(file.name));
+    const images = files.filter((file) => /\.(?:pgm|png|bmp)$/i.test(file.name));
     if (yamls.length > 1 || images.length > 1) {
       throw Error("Select at most one YAML and one image");
     }
@@ -55,6 +55,7 @@ export class MapImportSession {
       return {
         map: null,
         message: `YAML expects ${expected}; select the matching image`,
+        error: yamls.length === 1 && images.length === 1,
       };
     }
     const map = await loadMapPair(yaml.name, yamlText, image.name, image);

@@ -51,4 +51,5 @@ node --test tests/*.mjs
 
 ## Documentation
 
-API endpoints, file operations, and server permissions are documented in [docs/api.md](docs/api.md).
+- [Architecture](docs/architecture.md)
+- [File API](docs/api.md)

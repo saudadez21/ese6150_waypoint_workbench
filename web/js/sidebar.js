@@ -20,7 +20,12 @@ export function initSidebar() {
   function paint() {
     layout.style.setProperty("--sidebar-width", `${width}px`);
     layout.classList.toggle("sidebar-collapsed", collapsed);
-    toggle.textContent = collapsed ? "›" : "‹";
+    toggle
+      .querySelector("use")
+      .setAttribute(
+        "href",
+        `./assets/icons.svg#panel-left-${collapsed ? "open" : "close"}`,
+      );
     toggle.setAttribute("aria-expanded", String(!collapsed));
     const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
     toggle.setAttribute("aria-label", label);

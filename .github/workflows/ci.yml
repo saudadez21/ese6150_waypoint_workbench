@@ -22,7 +22,13 @@ jobs:
         with:
           node-version: '22'
       - name: Install Python runtime and tests
-        run: python -m pip install -e . pytest
+        run: python -m pip install -e . pytest ruff==0.14.6
+      - name: Ruff check
+        run: python -m ruff check .
+      - name: Ruff format
+        run: python -m ruff format --check . --exclude tests
+      - name: Prettier check (first-party web files)
+        run: npx --yes prettier@3.1.0 --check "web/**/*.{js,css,html}" "!web/vendor/**"
       - name: Python tests (including Flask integration)
         run: python -m pytest -q
       - name: JavaScript tests
