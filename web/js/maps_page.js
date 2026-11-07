@@ -1,4 +1,5 @@
 import { initHelp } from "./help.js";
+import { initFileDrop } from "./file_drop.js";
 import { initSidebar } from "./sidebar.js";
 import { Api } from "./api.js";
 import { MapEditCanvas } from "./map_canvas.js";
@@ -52,7 +53,29 @@ const canvas = new MapEditCanvas($("canvas"), {
   onError: (error) => notice(error.message, true),
 });
 
+function showMapProperties(map) {
+  const details = $("mapProperties");
+  details.open = false;
+  $("mapPropertiesSection").classList.toggle("hidden", !map);
+  if (!map) return;
+  const fields = {
+    propertyImage: map.imageName,
+    propertySize: `${map.width} × ${map.height} px`,
+    propertyResolution: `${map.resolution} m/px`,
+    propertyOrigin: `[${map.origin.join(", ")}]`,
+    propertyNegate: String(map.negate),
+    propertyOccupied: String(map.occupiedThresh),
+    propertyFree: String(map.freeThresh),
+    propertyMode: map.mode,
+  };
+  for (const [id, value] of Object.entries(fields)) $(id).textContent = value;
+}
+
 function render() {
+  document
+    .querySelectorAll("[data-api-only]")
+    .forEach((element) => element.classList.toggle("hidden", !api.online));
+  $("emptyState").classList.toggle("hidden", Boolean(activeMap));
   $("undo").disabled = !canvas.canUndo;
   $("redo").disabled = !canvas.canRedo;
   $("refreshMaps").disabled = !api.online;
@@ -70,7 +93,9 @@ function render() {
 
 function options() {
   $("brushLabel").textContent = $("brushSize").value;
-  $("fillShape").disabled = !["rectangle", "ellipse"].includes($("paintShape").value);
+  const shape = ["rectangle", "ellipse"].includes($("paintShape").value);
+  $("constructionSettings").classList.toggle("hidden", !shape);
+  $("fillShape").disabled = !shape;
   $("brushSize").disabled = ["fill", "eyedropper", "pan"].includes(
     $("paintShape").value,
   );
@@ -79,6 +104,7 @@ function options() {
     value: $("paintValue").value,
     size: Number($("brushSize").value),
     filled: $("fillShape").checked,
+    construction: $("constructionMode").value,
   });
 }
 
@@ -98,6 +124,7 @@ async function refresh() {
 async function openMap(map) {
   if (canvas.changed && !confirm("Discard edits to the current map?")) return;
   activeMap = map;
+  showMapProperties(map);
   mapImporter.clear();
   await canvas.setMap(map, map.image);
   showMapInfo();
@@ -120,7 +147,10 @@ function showMapInfo(message = "") {
 async function importMapFiles(files) {
   const result = await mapImporter.add(files);
   if (result.map) await openMap(result.map);
-  else showMapInfo(result.message);
+  else {
+    showMapInfo(result.message);
+    if (result.error) notice(result.message, true);
+  }
 }
 
 async function exportMap() {
@@ -129,9 +159,12 @@ async function exportMap() {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(name)) {
     throw Error("Enter a valid map name");
   }
-  // Unedited maps retain their original image bytes and YAML text.
-  const rgba = canvas.changed ? canvas.imageData.data : null;
-  const { archive, filename } = await downloadMapZip(activeMap, rgba, name);
+  const { archive, filename } = await downloadMapZip(
+    activeMap,
+    activeMap.cells,
+    name,
+    canvas.changed,
+  );
   download(archive, filename);
   notice(`Downloaded ${filename}`);
 }
@@ -142,6 +175,7 @@ function bind(id, action) {
 
 async function main() {
   await refresh();
+  showMapProperties(null);
   options();
   render();
   $("mapFiles").addEventListener("change", () => {
@@ -213,7 +247,13 @@ async function main() {
       if (await openMap(map)) $("newMapDialog").close();
     });
   });
-  for (const id of ["paintValue", "paintShape", "brushSize", "fillShape"]) {
+  for (const id of [
+    "paintValue",
+    "paintShape",
+    "constructionMode",
+    "brushSize",
+    "fillShape",
+  ]) {
     $(id).addEventListener(id === "brushSize" ? "input" : "change", options);
   }
   bind("undo", () => {
@@ -246,7 +286,7 @@ async function main() {
       event.preventDefault();
       canvas.redo();
       render();
-    } else if (event.key === "Escape" && canvas.drag) {
+    } else if (event.key === "Escape" && canvas.hasPending) {
       event.preventDefault();
       canvas.cancelStroke();
       render();
@@ -258,20 +298,6 @@ async function main() {
       event.returnValue = "";
     }
   });
-  document.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    $("dropZone").classList.remove("hidden");
-  });
-  document.addEventListener("dragleave", (event) => {
-    if (!event.relatedTarget) $("dropZone").classList.add("hidden");
-  });
-  document.addEventListener("drop", (event) => {
-    event.preventDefault();
-    $("dropZone").classList.add("hidden");
-    run(async () => {
-      const files = [...event.dataTransfer.files];
-      if (files.length) await importMapFiles(files);
-    });
-  });
+  initFileDrop($("dropZone"), (files) => run(() => importMapFiles(files)));
 }
 main().catch((error) => notice(error.message, true));

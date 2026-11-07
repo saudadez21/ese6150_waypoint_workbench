@@ -29,10 +29,34 @@
         >
           ?
         </button>
-        <button class="button subtle" id="undo" disabled>Undo</button>
-        <button class="button subtle" id="redo" disabled>Redo</button>
+        <button
+          class="button subtle icon-only"
+          id="undo"
+          disabled
+          aria-label="Undo"
+          title="Undo"
+        >
+          <svg class="button-symbol" aria-hidden="true">
+            <use href="./assets/icons.svg#undo-2"></use>
+          </svg>
+        </button>
+        <button
+          class="button subtle icon-only"
+          id="redo"
+          disabled
+          aria-label="Redo"
+          title="Redo"
+        >
+          <svg class="button-symbol" aria-hidden="true">
+            <use href="./assets/icons.svg#redo-2"></use>
+          </svg>
+        </button>
         <button class="button subtle" id="reset" disabled>Reset</button>
-        <button class="button primary" id="download" disabled>Download CSV</button>
+        <button class="button primary" id="download" disabled>
+          <svg class="button-symbol" aria-hidden="true">
+            <use href="./assets/icons.svg#download"></use></svg
+          ><span>Download CSV</span>
+        </button>
       </div>
     </header>
     <div class="layout">
@@ -46,28 +70,59 @@
             aria-label="Collapse sidebar"
             title="Collapse sidebar"
           >
-            ‹
+            <svg class="button-symbol" aria-hidden="true">
+              <use href="./assets/icons.svg#panel-left-close"></use>
+            </svg>
           </button>
         </div>
         <div class="sidebar-content">
           <section>
-            <h2>MAP</h2>
-            <label for="mapFiles">API maps</label>
-            <select id="mapFiles" disabled>
-              <option value="">No API connection</option>
-            </select>
-            <div class="button-row">
-              <button class="button" id="loadApiMap" disabled>Load</button>
-              <button class="button subtle" id="refreshMaps" disabled>Refresh</button>
+            <div class="section-title-row">
+              <h2>MAP</h2>
+              <button
+                class="button refresh-button hidden"
+                id="refreshMaps"
+                type="button"
+                data-api-only
+                disabled
+                aria-label="Refresh maps"
+                title="Refresh maps"
+              >
+                <svg class="button-symbol" aria-hidden="true">
+                  <use href="./assets/icons.svg#refresh-cw"></use>
+                </svg>
+              </button>
             </div>
-            <button class="button wide" id="importMap">Import Map</button>
-            <button class="button wide secondary" id="uploadMap" disabled>
-              Upload
+            <div class="api-controls hidden" data-api-only>
+              <label for="mapFiles">API maps</label>
+              <select id="mapFiles" disabled>
+                <option value="">No API connection</option>
+              </select>
+              <button class="button wide" id="loadApiMap" disabled>
+                <svg class="button-symbol" aria-hidden="true">
+                  <use href="./assets/icons.svg#folder-down"></use></svg
+                ><span>Load</span>
+              </button>
+            </div>
+            <button class="button wide primary" id="importMap">
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#folder-open"></use></svg
+              ><span>Import Map</span>
+            </button>
+            <button
+              class="button wide secondary hidden"
+              id="uploadMap"
+              data-api-only
+              disabled
+            >
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#upload"></use></svg
+              ><span>Upload</span>
             </button>
             <input
               id="mapInput"
               type="file"
-              accept=".yaml,.pgm,.png,.zip"
+              accept=".yaml,.yml,.pgm,.png,.bmp,.zip"
               multiple
               hidden
             />
@@ -77,23 +132,52 @@
             </button>
           </section>
           <section>
-            <h2>WAYPOINTS</h2>
-            <label for="waypointFiles">API waypoints</label>
-            <select id="waypointFiles" disabled>
-              <option value="">No API connection</option>
-            </select>
-            <div class="button-row">
-              <button class="button" id="loadApiWaypoint" disabled>Load</button>
-              <button class="button subtle" id="refreshWaypoints" disabled>
-                Refresh
+            <div class="section-title-row">
+              <h2>WAYPOINTS</h2>
+              <button
+                class="button refresh-button hidden"
+                id="refreshWaypoints"
+                type="button"
+                data-api-only
+                disabled
+                aria-label="Refresh waypoints"
+                title="Refresh waypoints"
+              >
+                <svg class="button-symbol" aria-hidden="true">
+                  <use href="./assets/icons.svg#refresh-cw"></use>
+                </svg>
               </button>
             </div>
-            <div class="button-row">
-              <button class="button" id="newWaypoint">New</button
-              ><button class="button" id="importCsv">Import CSV</button>
+            <div class="api-controls hidden" data-api-only>
+              <label for="waypointFiles">API waypoints</label>
+              <select id="waypointFiles" disabled>
+                <option value="">No API connection</option>
+              </select>
+              <button class="button wide" id="loadApiWaypoint" disabled>
+                <svg class="button-symbol" aria-hidden="true">
+                  <use href="./assets/icons.svg#folder-down"></use></svg
+                ><span>Load</span>
+              </button>
             </div>
-            <button class="button wide secondary" id="uploadWaypoint" disabled>
-              Upload
+            <button class="button wide" id="newWaypoint">
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#plus"></use></svg
+              ><span>New</span>
+            </button>
+            <button class="button wide primary" id="importCsv">
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#folder-open"></use></svg
+              ><span>Import CSV</span>
+            </button>
+            <button
+              class="button wide secondary hidden"
+              id="uploadWaypoint"
+              data-api-only
+              disabled
+            >
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#upload"></use></svg
+              ><span>Upload</span>
             </button>
             <input id="csvInput" type="file" accept=".csv" multiple hidden />
             <div class="track-list" id="tracks">
@@ -174,8 +258,25 @@
         </div>
         <div class="canvas-wrap">
           <canvas id="canvas" tabindex="0" aria-label="Waypoint canvas"></canvas>
+          <div class="canvas-empty" id="emptyState" role="note">
+            <div class="import-symbol" aria-hidden="true">
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#file-up"></use>
+              </svg>
+            </div>
+            <strong>Drop files to import</strong>
+            <span>CSV · YAML + PGM/PNG/BMP · ZIP</span>
+          </div>
           <div id="pointTooltip" class="point-tooltip hidden" role="tooltip"></div>
-          <div id="dropZone" class="drop-zone hidden">Drop CSV or map files</div>
+          <div id="dropZone" class="drop-zone hidden" aria-hidden="true">
+            <div class="import-symbol" aria-hidden="true">
+              <svg class="button-symbol" aria-hidden="true">
+                <use href="./assets/icons.svg#file-up"></use>
+              </svg>
+            </div>
+            <strong>Drop files to import</strong>
+            <span>CSV · YAML + PGM/PNG/BMP · ZIP</span>
+          </div>
         </div>
         <footer class="canvas-footer">
           <span id="status">No track loaded</span><span id="measurements"></span

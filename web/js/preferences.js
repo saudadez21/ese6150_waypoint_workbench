@@ -2,35 +2,21 @@
 export const DEFAULT_ALIASES = {
   x_m: "x",
   y_m: "y",
-  theta: "yaw",
-  psi: "yaw",
-  psi_rad: "yaw",
-  heading: "yaw",
   velocity: "v",
   vx_mps: "v",
   speed: "v",
 };
 
-export const TARGETS = ["x", "y", "yaw", "v", "other"];
+export const TARGETS = ["x", "y", "v"];
 export const DEFAULTS = {
   apiUrl: "",
-  colors: [
-    "#63a4ff",
-    "#ffbc64",
-    "#54d6ae",
-    "#bb92ff",
-    "#ff779b",
-    "#44d4ea",
-    "#e9d36d",
-    "#8ad273",
-  ],
+  maxTracks: 64,
   closureGap: 0.75,
-  undoLimit: 100,
   csvDecimalPlaces: 6,
   aliases: DEFAULT_ALIASES,
 };
-const KEY = "waypoint_workbench_preferences_v3";
-export const MAX_TRACK_COLORS = 64;
+const KEY = "waypoint_workbench_preferences_v4";
+const PREVIOUS_KEY = "waypoint_workbench_preferences_v3";
 export const TOKEN_KEY = "waypoint_workbench_api_token";
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -43,12 +29,11 @@ export function validatePreferences(value) {
     if (Object.hasOwn(value, key)) result[key] = value[key];
   }
   if (
-    !Array.isArray(result.colors) ||
-    result.colors.length < 1 ||
-    result.colors.length > MAX_TRACK_COLORS ||
-    result.colors.some((color) => !/^#[0-9a-f]{6}$/i.test(color))
+    !Number.isInteger(result.maxTracks) ||
+    result.maxTracks < 1 ||
+    result.maxTracks > 64
   ) {
-    throw Error(`Track colors must contain 1–${MAX_TRACK_COLORS} #RRGGBB values`);
+    throw Error("Max tracks must be 1–64");
   }
   if (
     !Number.isFinite(result.closureGap) ||
@@ -56,13 +41,6 @@ export function validatePreferences(value) {
     result.closureGap > 50
   ) {
     throw Error("Closure gap must be between 0 and 50 m");
-  }
-  if (
-    !Number.isInteger(result.undoLimit) ||
-    result.undoLimit < 1 ||
-    result.undoLimit > 500
-  ) {
-    throw Error("Undo limit must be 1–500");
   }
   if (
     !Number.isInteger(result.csvDecimalPlaces) ||
@@ -97,9 +75,36 @@ export function validatePreferences(value) {
   return result;
 }
 
+// Migrate v3 preferences to v4. Remove on the next schema update.
+function migratePreferences(previous) {
+  if (!previous || typeof previous !== "object" || Array.isArray(previous)) {
+    throw Error("Invalid previous preferences");
+  }
+  const migrated = { ...previous };
+  if (
+    previous.aliases &&
+    typeof previous.aliases === "object" &&
+    !Array.isArray(previous.aliases)
+  ) {
+    migrated.aliases = Object.fromEntries(
+      Object.entries(previous.aliases).filter(([, target]) => TARGETS.includes(target)),
+    );
+  }
+  return validatePreferences(migrated);
+}
+
 export function readPreferences() {
   try {
-    return validatePreferences(JSON.parse(localStorage.getItem(KEY) || "{}"));
+    const stored = localStorage.getItem(KEY);
+    if (stored !== null) return validatePreferences(JSON.parse(stored));
+
+    const previous = localStorage.getItem(PREVIOUS_KEY);
+    if (previous === null) return clone(DEFAULTS);
+
+    const migrated = migratePreferences(JSON.parse(previous));
+    localStorage.setItem(KEY, JSON.stringify(migrated));
+    localStorage.removeItem(PREVIOUS_KEY);
+    return migrated;
   } catch {
     return clone(DEFAULTS);
   }

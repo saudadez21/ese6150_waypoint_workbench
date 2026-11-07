@@ -1,17 +1,57 @@
-/** Small, dependency-free grayscale occupancy editor with per-stroke undo/redo. */
+/** Occupancy grid editing with per-stroke undo/redo. */
 const HISTORY_LIMIT = 100;
 const MAX_STROKE_PIXELS = 750_000;
 
+/** A rectangle's first edge and signed perpendicular depth, in image pixels. */
+export function threePointFrame(start, axis, through, square = false) {
+  const dx = axis[0] - start[0];
+  const dy = axis[1] - start[1];
+  const width = Math.hypot(dx, dy);
+  if (width < 0.001) return null;
+  const ux = dx / width;
+  const uy = dy / width;
+  const vx = -uy;
+  const vy = ux;
+  const depth = (through[0] - axis[0]) * vx + (through[1] - axis[1]) * vy;
+  const height = square ? Math.sign(depth || 1) * width : depth;
+  const offset = [vx * height, vy * height];
+  const corners = [
+    start,
+    axis,
+    [axis[0] + offset[0], axis[1] + offset[1]],
+    [start[0] + offset[0], start[1] + offset[1]],
+  ];
+  return {
+    corners,
+    ux,
+    uy,
+    vx,
+    vy,
+    width,
+    height,
+    center: [start[0] + (dx + offset[0]) / 2, start[1] + (dy + offset[1]) / 2],
+  };
+}
+
+/** Snap a line's direction to multiples of 45 degrees without changing its length. */
+export function snapLine45(start, end, constrained = false) {
+  if (!constrained) return end;
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const length = Math.hypot(dx, dy);
+  if (!length) return end;
+  const angle = (Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI) / 4;
+  return [start[0] + length * Math.cos(angle), start[1] + length * Math.sin(angle)];
+}
+
 export class MapPaint {
-  constructor(width, height, pixels, negate = 0) {
-    if (pixels.length !== width * height) {
-      throw new Error("Invalid map image dimensions");
-    }
+  constructor(width, height, cells) {
+    if (cells.length !== width * height) throw Error("Invalid map grid dimensions");
     this.width = width;
     this.height = height;
-    this.original = Uint8Array.from(pixels);
-    this.pixels = Uint8Array.from(pixels);
-    this.negate = negate;
+    // Edit the document cells directly so other views share the same map.
+    this.cells = cells;
+    this.original = Int8Array.from(cells);
     this.undoStack = [];
     this.redoStack = [];
     this.pending = null;
@@ -30,19 +70,24 @@ export class MapPaint {
   }
 
   setPixel(index, value) {
-    const before = this.pixels[index];
-    if (before === value) return;
-    if (before !== this.original[index]) this.modifiedPixels--;
+    const previous = this.cells[index];
+    if (previous === value) return;
+    if (previous !== this.original[index]) this.modifiedPixels--;
     if (value !== this.original[index]) this.modifiedPixels++;
-    this.pixels[index] = value;
+    this.cells[index] = value;
     this.dirty.add(index);
   }
 
   value(tool) {
-    if (tool === "wall") return this.negate ? 255 : 0;
-    if (tool === "free") return this.negate ? 0 : 255;
-    if (tool === "unknown") return this.negate ? 50 : 205;
-    throw new Error("Unknown map paint tool");
+    const value = { wall: 100, free: 0, unknown: -1 }[tool];
+    if (value === undefined) throw Error(`Unknown map paint tool: ${tool}`);
+    return value;
+  }
+
+  /** Establish the saved checkpoint without discarding undo history. */
+  checkpoint() {
+    this.original.set(this.cells);
+    this.modifiedPixels = 0;
   }
 
   begin() {
@@ -55,12 +100,12 @@ export class MapPaint {
     y = Math.round(y);
     if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
     const index = y * this.width + x;
-    if (this.pixels[index] === value) return;
+    if (this.cells[index] === value) return;
     if (!this.pending.has(index)) {
       if (this.pending.size >= MAX_STROKE_PIXELS) {
-        throw new Error("Map edit is too large for one undo step");
+        throw Error("Map edit is too large for one undo step");
       }
-      this.pending.set(index, this.pixels[index]);
+      this.pending.set(index, this.cells[index]);
     }
     this.setPixel(index, value);
   }
@@ -138,19 +183,90 @@ export class MapPaint {
     }
   }
 
-  /** Fill the connected region matching the clicked pixel's exact grayscale value. */
+  rotatedRectangle(start, axis, through, size, value, filled, square = false) {
+    const frame = threePointFrame(start, axis, through, square);
+    if (!frame || Math.abs(frame.height) < 0.001) return;
+    if (!filled) {
+      const corners = frame.corners;
+      for (let i = 0; i < 4; i++) {
+        this.line(...corners[i], ...corners[(i + 1) % 4], size, value);
+      }
+      return;
+    }
+    const xs = frame.corners.map((point) => point[0]);
+    const ys = frame.corners.map((point) => point[1]);
+    const left = Math.max(0, Math.floor(Math.min(...xs)));
+    const right = Math.min(this.width - 1, Math.ceil(Math.max(...xs)));
+    const top = Math.max(0, Math.floor(Math.min(...ys)));
+    const bottom = Math.min(this.height - 1, Math.ceil(Math.max(...ys)));
+    const startX = start[0];
+    const startY = start[1];
+    for (let y = top; y <= bottom; y++) {
+      for (let x = left; x <= right; x++) {
+        const along = (x - startX) * frame.ux + (y - startY) * frame.uy;
+        const across = (x - startX) * frame.vx + (y - startY) * frame.vy;
+        if (
+          along >= -0.001 &&
+          along <= frame.width + 0.001 &&
+          Math.min(0, frame.height) - 0.001 <= across &&
+          across <= Math.max(0, frame.height) + 0.001
+        ) {
+          this.point(x, y, value);
+        }
+      }
+    }
+  }
+
+  rotatedEllipse(start, axis, through, size, value, filled, circle = false) {
+    const frame = threePointFrame(start, axis, through, circle);
+    if (!frame || Math.abs(frame.height) < 0.001) return;
+    const rx = frame.width / 2;
+    const ry = Math.abs(frame.height) / 2;
+    const { center, ux, uy, vx, vy } = frame;
+    if (filled) {
+      const extentX = Math.hypot(rx * ux, ry * vx);
+      const extentY = Math.hypot(rx * uy, ry * vy);
+      const left = Math.max(0, Math.floor(center[0] - extentX));
+      const right = Math.min(this.width - 1, Math.ceil(center[0] + extentX));
+      const top = Math.max(0, Math.floor(center[1] - extentY));
+      const bottom = Math.min(this.height - 1, Math.ceil(center[1] + extentY));
+      for (let y = top; y <= bottom; y++) {
+        for (let x = left; x <= right; x++) {
+          const dx = x - center[0];
+          const dy = y - center[1];
+          const localX = (dx * ux + dy * uy) / rx;
+          const localY = (dx * vx + dy * vy) / ry;
+          if (localX ** 2 + localY ** 2 <= 1.001) this.point(x, y, value);
+        }
+      }
+      return;
+    }
+    const steps = Math.max(16, Math.ceil(4 * Math.PI * Math.max(rx, ry)));
+    const pointAt = (angle) => [
+      center[0] + rx * Math.cos(angle) * ux + ry * Math.sin(angle) * vx,
+      center[1] + rx * Math.cos(angle) * uy + ry * Math.sin(angle) * vy,
+    ];
+    let previous = pointAt(0);
+    for (let step = 1; step <= steps; step++) {
+      const current = pointAt((2 * Math.PI * step) / steps);
+      this.line(...previous, ...current, size, value);
+      previous = current;
+    }
+  }
+
+  /** Fill a connected region of exactly equal occupancy values. */
   floodFill(x, y, value) {
     x = Math.round(x);
     y = Math.round(y);
     if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
     const start = y * this.width + x;
-    const original = this.pixels[start];
+    const original = this.cells[start];
     if (original === value) return;
-    const length = this.pixels.length;
+    const length = this.cells.length;
     const visited = new Uint8Array(length);
     const queue = new Int32Array(Math.min(length, MAX_STROKE_PIXELS + 8));
-    let front = 0;
-    let back = 1;
+    let front = 0,
+      back = 1;
     queue[0] = start;
     visited[start] = 1;
     while (front < back) {
@@ -164,9 +280,9 @@ export class MapPaint {
         index + this.width < length ? index + this.width : -1,
       ];
       for (const next of neighbors) {
-        if (next >= 0 && !visited[next] && this.pixels[next] === original) {
+        if (next >= 0 && !visited[next] && this.cells[next] === original) {
           if (back >= queue.length)
-            throw new Error("Map edit is too large for one undo step");
+            throw Error("Map edit is too large for one undo step");
           visited[next] = 1;
           queue[back++] = next;
         }
@@ -174,19 +290,12 @@ export class MapPaint {
     }
   }
 
-  /** Return the nearest canonical ROS paint category. */
   sample(x, y) {
     x = Math.round(x);
     y = Math.round(y);
     if (x < 0 || y < 0 || x >= this.width || y >= this.height) return null;
-    const gray = this.pixels[y * this.width + x];
-    return ["wall", "free", "unknown"].reduce(
-      (closest, category) =>
-        Math.abs(this.value(category) - gray) < Math.abs(this.value(closest) - gray)
-          ? category
-          : closest,
-      "wall",
-    );
+    const occupancy = this.cells[y * this.width + x];
+    return occupancy < 0 ? "unknown" : occupancy >= 50 ? "wall" : "free";
   }
 
   commit() {
@@ -194,7 +303,7 @@ export class MapPaint {
     const changes = [...this.pending].map(([index, previous]) => [
       index,
       previous,
-      this.pixels[index],
+      this.cells[index],
     ]);
     this.pending = null;
     if (!changes.length) return false;
@@ -206,18 +315,14 @@ export class MapPaint {
 
   cancel() {
     if (!this.pending) return;
-    for (const [index, previous] of this.pending) {
-      this.setPixel(index, previous);
-    }
+    for (const [index, previous] of this.pending) this.setPixel(index, previous);
     this.pending = null;
   }
 
   undo() {
     const changes = this.undoStack.pop();
     if (!changes) return false;
-    for (const [index, previous] of changes) {
-      this.setPixel(index, previous);
-    }
+    for (const [index, previous] of changes) this.setPixel(index, previous);
     this.redoStack.push(changes);
     return true;
   }
@@ -225,17 +330,13 @@ export class MapPaint {
   redo() {
     const changes = this.redoStack.pop();
     if (!changes) return false;
-    for (const [index, , next] of changes) {
-      this.setPixel(index, next);
-    }
+    for (const [index, , next] of changes) this.setPixel(index, next);
     this.undoStack.push(changes);
     return true;
   }
 
   reset() {
-    this.pixels.set(this.original);
-    this.dirty.clear();
-    this.modifiedPixels = 0;
+    for (let i = 0; i < this.cells.length; i++) this.setPixel(i, this.original[i]);
     this.pending = null;
     this.undoStack = [];
     this.redoStack = [];

@@ -43,3 +43,24 @@ export function insertion(points, click, closed) {
   }
   return best && { index: best.index, point: best.point };
 }
+
+/** Continuous image coordinates use the upper-left boundary as (0, 0). */
+export function imageToWorld(map, x, y) {
+  const [ox, oy, yaw] = map.origin;
+  const dx = x * map.resolution;
+  const dy = (map.height - y) * map.resolution;
+  return [
+    ox + Math.cos(yaw) * dx - Math.sin(yaw) * dy,
+    oy + Math.sin(yaw) * dx + Math.cos(yaw) * dy,
+  ];
+}
+
+export function worldToImage(map, x, y) {
+  const [ox, oy, yaw] = map.origin;
+  const dx = x - ox,
+    dy = y - oy;
+  return [
+    (Math.cos(yaw) * dx + Math.sin(yaw) * dy) / map.resolution,
+    map.height - (-Math.sin(yaw) * dx + Math.cos(yaw) * dy) / map.resolution,
+  ];
+}
